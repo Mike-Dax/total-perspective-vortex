@@ -34,7 +34,6 @@ export function sparseToDense(
   };
 
   // Start
-
   let previousMovement: Movement = new Point(
     settings.startingPoint,
     settings.waitAtStartDuration,
@@ -42,8 +41,10 @@ export function sparseToDense(
   );
 
   // Middle
-
   for (const movement of sparseBag) {
+    // Set the max speed of the movement so velocities are scaled
+    movement.setMaxSpeed(settings.maxSpeed);
+
     // Build our transition movement from the old movement to the new
     const transition = new Transition(
       previousMovement,
@@ -63,7 +64,6 @@ export function sparseToDense(
   }
 
   // End
-
   let lastMovement: Movement = new Point(
     settings.endingPoint,
     settings.waitAtStartDuration,
@@ -109,9 +109,11 @@ export function sparseToCost(
   const dense = sparseToDense(sparseBag, settings);
   const flattened = flattenDense(dense);
 
-  // Iterate through each movement, sampling the movement
-
-  return 0;
+  // For now, use the total duration as the cost function
+  return flattened.reduce(
+    (duration, movement) => movement.getDuration() + duration,
+    0
+  );
 }
 
 function swap(array: any[], a: number, b: number) {
