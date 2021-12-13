@@ -23,7 +23,7 @@ class TPVExportLayout(bpy.types.Panel):
         row = layout.row(align=True)
         row.prop(context.scene, 'export_pathStatic', icon="MESH_CUBE")
         row = layout.row(align=True)
-        row.label(text='Unity:')
+        row.label(text='Export:')
         row = layout.row(align=True)
         row.operator("object.gptounityanimated", icon="EXPORT")
 
@@ -78,8 +78,8 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
         col: mathutils.Color = layer.color
 
         layer_struct = dict({
-            "material": serialise_material_simple_emission(col),
             "info": layer.info,
+            "material": serialise_material_simple_emission(col),
             "strokes": [],
         })
         save_struct["layers"].append(layer_struct)
@@ -215,7 +215,7 @@ def get_random_color():
 
 class OBJECT_OT_TPVExport(Operator):
     bl_idname = "object.gptounityanimated"
-    bl_label = "Export Selected Objects for TPV"
+    bl_label = "Export Selected Objects"
     bl_options = {'REGISTER', 'UNDO'}
 
     def execute(self, context):
