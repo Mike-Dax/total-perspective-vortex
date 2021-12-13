@@ -47,7 +47,7 @@ def save_file(file_path: str, contents: dict):
 
 
 def serialise_color(color: mathutils.Color):
-    return [color.r, color.g, color.b]
+    return [color.r, color.g, color.b, 1]
 
 
 def serialise_vector(vec: list[float]):
@@ -63,12 +63,12 @@ def slugify(name: str):
     return re.sub(r'[\W_]+', '_', name.lower())
 
 
-def grease_pencil_export(self, context, frame_number: int):
-    gp_obj = bpy.context.view_layer.objects.active
+def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct):
     gp_layers = gp_obj.data.layers
 
     save_struct = dict({
         "type": "gpencil",
+        "name": gp_obj.name,
         "layers": [],
     })
 
@@ -78,7 +78,7 @@ def grease_pencil_export(self, context, frame_number: int):
         col: mathutils.Color = layer.color
 
         layer_struct = dict({
-            "color": serialise_color(col),
+            "material": serialise_material_simple_emission(col),
             "info": layer.info,
             "strokes": [],
         })
@@ -119,6 +119,93 @@ def grease_pencil_export(self, context, frame_number: int):
     # Save the frame
     save_file(get_output_filepath(context, frame_number, gp_obj.name), save_struct)
 
+
+def serialise_material_simple_emission(color: mathutils.Color):
+    try:
+        return dict({
+            "type": "color",
+            "color": serialise_color(color)
+        })
+    except:
+        pass
+
+    return dict({
+        "type": "color",
+        "color": serialise_vector(color)
+    })
+
+
+def serialise_material(material_slot: str):
+    # Right now, assume it's a simple Emission material with a default colour
+    try:
+        # Fetch the material from the graph
+        mat = bpy.data.materials[material_slot]
+        # get the nodes
+        nodes = mat.node_tree.nodes
+        # get some specific node:
+        # returns None if the node does not exist
+        emission: bpy.types.Emission = nodes.get("Emission")
+
+        if emission is None:
+            print("Material {slot} has no Emission nodes".format(slot=material_slot))
+            return None
+
+        return dict({
+            "type": "color",
+            "color": serialise_vector(emission.inputs[0].default_value)
+        })
+    except:
+        return None
+
+
+def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.bpy_struct):
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    particle_systems = pt_obj.evaluated_get(deps_graph).particle_systems
+
+    save_struct = dict({
+        "type": "particles",
+        "name": pt_obj.name,
+        "systems": [],
+    })
+
+    has_content = False
+
+    material_slots = pt_obj.evaluated_get(deps_graph).material_slots
+
+    for index, _ in enumerate(particle_systems):
+        ps: bpy.types.ParticleSystem = particle_systems[index]
+        settings: bpy.types.ParticleSettings = ps.settings
+
+        if ps.settings.type != "EMITTER":
+            print("Hair not supported yet")
+            return
+
+        system_struct = dict({
+            "name": ps.name,
+            "material": serialise_material(settings.material_slot),
+            "particles": [],
+        })
+        save_struct["systems"].append(system_struct)
+
+        for particle in ps.particles:
+            if particle.alive_state != "ALIVE": # enum in [‘DEAD’, ‘UNBORN’, ‘ALIVE’, ‘DYING’], default ‘DEAD’
+                continue
+
+            particle_struct = dict({
+                "location": serialise_vector(particle.location),
+                "rotation": serialise_vector(particle.rotation),
+                "velocity": serialise_vector(particle.velocity)
+            })
+            system_struct["particles"].append(particle_struct)
+
+            has_content = True
+
+
+    if has_content:
+        save_file(get_output_filepath(context, frame_number, pt_obj.name), save_struct)
+
+
 def get_random_color():
     ''' generate rgb using a list comprehension '''
     r, g, b = [random.random() for i in range(3)]
@@ -152,24 +239,29 @@ class OBJECT_OT_TPVExport(Operator):
         start_frame = bpy.context.scene.frame_start
         end_frame = bpy.context.scene.frame_end
 
-        # Select the window manager
-        wm: bpy.types.context.window_manager = bpy.context.window_manager
-
-        # Start the progress bar
-        wm.progress_begin(start_frame, end_frame)
-
         for frame_number in range(start_frame, end_frame):
             # Update the progress bar
-            wm.progress_update(frame_number)
+            print("Processing frame {frame_number} in range ({start_frame}-{end_frame})".format(frame_number=frame_number,start_frame=start_frame,end_frame=end_frame))
+
+            # Set the frame in the editor
+            bpy.context.scene.frame_set(frame_number)
+
             # Run through every object, run the corresponding command
             for selObj in selObjs:
+                bpy.ops.object.select_all(action='DESELECT')
+                selObj.select_set(True)
+                bpy.context.view_layer.objects.active = selObj
+
                 if selObj.type == "GPENCIL":
-                    bpy.ops.object.select_all(action='DESELECT')
-                    selObj.select_set(True)
-                    bpy.context.view_layer.objects.active = selObj
+                    grease_pencil_export(self, bpy.context, frame_number, selObj)
 
-                    grease_pencil_export(self, bpy.context, frame_number)
+                if selObj.type == "PARTICLES" or selObj.type == "MESH":
+                    particle_system_export(self, bpy.context, frame_number, selObj)
 
-        wm.progress_end()
+
+
+
+        # Reset the frame that was selected
+        bpy.context.scene.frame_set(saveFrame)
 
         return {'FINISHED'}

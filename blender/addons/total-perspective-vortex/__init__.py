@@ -21,6 +21,7 @@ bl_info = {
 def register():
     importlib.reload(tpv)
     print("tpv register")
+
     bpy.utils.register_class(tpv.TPVExportLayout)
     bpy.utils.register_class(tpv.OBJECT_OT_TPVExport)
     bpy.types.Scene.export_pathStatic = bpy.props.StringProperty(
@@ -30,11 +31,14 @@ def register():
         subtype='DIR_PATH')
 
 
+
+
 def unregister():
     print("tpv unregister")
     bpy.utils.unregister_class(tpv.OBJECT_OT_TPVExport)
     bpy.utils.unregister_class(tpv.TPVExportLayout)
     del bpy.types.Scene.export_pathStatic
+
 
 
 if __name__ == "__main__":
