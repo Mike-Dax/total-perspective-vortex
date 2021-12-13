@@ -1,5 +1,7 @@
-import { Vector3 } from "three";
+import { CubicBezierCurve3, Vector3 } from "three";
 import { MaterialJSON } from "../material";
+
+const defaultSpeed = 30; // mm/s
 
 /**
  * The base level optimisable movement.
@@ -25,6 +27,16 @@ export abstract class Movement {
    * Get the length of this movement in mm
    */
   abstract getLength: () => number;
+
+  /**
+   * Sets the desired speed for this movement in mm/second
+   */
+  abstract setMaxSpeed: (maxSpeed: number) => void;
+
+  /**
+   * Get the length of this movement in ms
+   */
+  abstract getDuration: () => number;
 
   /**
    * Get the starting position of this movement
@@ -91,9 +103,30 @@ export class MovementGroup extends Movement {
     );
   };
 
+  public setMaxSpeed = (speed: number) => {
+    if (this.movements.length === 0) {
+      throw new Error("MovementGroup is empty, but setSpeed was called");
+    }
+
+    for (const movement of this.movements) {
+      movement.setMaxSpeed(speed);
+    }
+  };
+
+  public getDuration = () => {
+    if (this.movements.length === 0) {
+      return 0;
+    }
+
+    return this.movements.reduce(
+      (dur, movement) => movement.getDuration() + dur,
+      0
+    );
+  };
+
   public getStart = () => {
     if (this.movements.length === 0) {
-      throw new Error("OrderedMovements is empty, but getStart was called");
+      throw new Error("MovementGroup is empty, but getStart was called");
     }
 
     return this.movements[0].getStart();
@@ -101,7 +134,7 @@ export class MovementGroup extends Movement {
 
   public getEnd = () => {
     if (this.movements.length === 0) {
-      throw new Error("OrderedMovements is empty, but getEnd was called");
+      throw new Error("MovementGroup is empty, but getEnd was called");
     }
 
     return this.movements[this.movements.length - 1].getEnd();
@@ -110,7 +143,7 @@ export class MovementGroup extends Movement {
   public getDesiredEntryVelocity = () => {
     if (this.movements.length === 0) {
       throw new Error(
-        "OrderedMovements is empty, but getDesiredEntryVelocity was called"
+        "MovementGroup is empty, but getDesiredEntryVelocity was called"
       );
     }
 
@@ -120,7 +153,7 @@ export class MovementGroup extends Movement {
   public getExpectedExitVelocity = () => {
     if (this.movements.length === 0) {
       throw new Error(
-        "OrderedMovements is empty, but getExpectedExitVelocity was called"
+        "MovementGroup is empty, but getExpectedExitVelocity was called"
       );
     }
 
@@ -137,6 +170,7 @@ export function isLine(movement: Movement): movement is Line {
  */
 export class Line extends Movement {
   readonly type = "line";
+  maxSpeed: number = defaultSpeed;
 
   constructor(
     public from: Vector3,
@@ -159,6 +193,15 @@ export class Line extends Movement {
     return this.from.distanceTo(this.to);
   };
 
+  public setMaxSpeed = (maxSpeed: number) => {
+    this.maxSpeed = maxSpeed;
+  };
+
+  public getDuration = () => {
+    // Lines are taken at maximum speed
+    return this.getLength() / this.maxSpeed;
+  };
+
   public getStart = () => {
     return this.from;
   };
@@ -168,11 +211,19 @@ export class Line extends Movement {
   };
 
   public getDesiredEntryVelocity = () => {
-    return this.to.clone().sub(this.from); // .normalize();
+    return this.to
+      .clone()
+      .sub(this.from)
+      .normalize()
+      .multiplyScalar(this.maxSpeed);
   };
 
   public getExpectedExitVelocity = () => {
-    return this.to.clone().sub(this.from); // .normalize();
+    return this.to
+      .clone()
+      .sub(this.from)
+      .normalize()
+      .multiplyScalar(this.maxSpeed);
   };
 }
 
@@ -185,6 +236,7 @@ export function isPoint(movement: Movement): movement is Point {
  */
 export class Point extends Movement {
   readonly type = "point";
+  maxSpeed: number = defaultSpeed;
 
   // For a particle, approach in the velocity of its velocity
   public velocity: Vector3 = new Vector3(0, 0, 0);
@@ -206,20 +258,45 @@ export class Point extends Movement {
     return 0;
   };
 
+  public setMaxSpeed = (maxSpeed: number) => {
+    this.maxSpeed = maxSpeed;
+  };
+
+  /**
+   * The duration of a point is determined by its set duration, or if it's nothing,
+   * the minimum unit of time, 1 millisecond.
+   */
+  public getDuration = () => {
+    if (this.duration > 0) {
+      return this.duration;
+    }
+
+    // The minimum duration is 1ms
+    return 1;
+  };
+
   public getStart = () => {
-    return this.pos;
+    // Start half of one millisecond away from our desired point, at max speed this is 0.15mm away
+    return this.getDesiredEntryVelocity()
+      .clone()
+      .multiplyScalar(0.001 / 2)
+      .sub(this.pos);
   };
 
   public getEnd = () => {
-    return this.pos;
+    // End half of one millisecond away from our desired point, at max speed this is 0.15mm away
+    return this.getExpectedExitVelocity()
+      .clone()
+      .multiplyScalar(0.001 / 2)
+      .add(this.pos);
   };
 
   public getDesiredEntryVelocity = () => {
-    return this.velocity;
+    return this.velocity.normalize().multiplyScalar(this.maxSpeed);
   };
 
   public getExpectedExitVelocity = () => {
-    return this.velocity;
+    return this.velocity.normalize().multiplyScalar(this.maxSpeed);
   };
 }
 
@@ -230,10 +307,11 @@ export function isTransition(movement: Movement): movement is Transition {
 /**
  * A transition is a move from one Movement to another.
  *
- * It's probably going to be a Cubic Bezier, with the scaled velocity components as control points
+ * It's probably going to be a Cubic Bezier, with the velocity components used as control points.
  */
 export class Transition extends Movement {
   readonly type = "transition";
+  maxSpeed: number = defaultSpeed;
 
   constructor(
     public from: Movement,
@@ -242,6 +320,27 @@ export class Transition extends Movement {
   ) {
     super();
   }
+
+  private curve: CubicBezierCurve3 | null = null;
+
+  private lazyGenerateCurve = () => {
+    if (this.curve) return this.curve;
+
+    /**
+     * v0 – The starting point.
+     * v1 – The first control point.
+     * v2 – The second control point.
+     * v3 – The ending point.
+     */
+    this.curve = new CubicBezierCurve3(
+      this.getStart(),
+      this.getStart().clone().add(this.getDesiredEntryVelocity()),
+      this.getEnd().clone().sub(this.getExpectedExitVelocity()),
+      this.getEnd()
+    );
+
+    return this.curve;
+  };
 
   // Swap the ordering of this transition movement
   flip = () => {
@@ -252,10 +351,19 @@ export class Transition extends Movement {
     // TODO: Flip the material
   };
 
-  public getLength: () => number = () => {
+  public getLength = () => {
     // TODO: What kind of curve is this, create it,
+    const curve = this.lazyGenerateCurve();
 
-    return 0;
+    return curve.getLength();
+  };
+
+  public setMaxSpeed = (maxSpeed: number) => {
+    this.maxSpeed = maxSpeed;
+  };
+
+  public getDuration = () => {
+    return this.getLength() / this.maxSpeed;
   };
 
   public getStart = () => {
