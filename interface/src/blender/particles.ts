@@ -1,5 +1,6 @@
 import { Color, Vector3 } from "three";
 import { MaterialJSON } from "./material";
+import { Point, Line, Movement, OrderedMovements } from "./movements/movements";
 
 export interface ParticlesStrokePoint {
   co: [number, number, number]; // position
@@ -17,11 +18,19 @@ export interface Particle {
 export class ParticleSystem {
   constructor(public name: string, public material: MaterialJSON) {}
 
-  private particles: Particle[] = [];
+  public particles: Particle[] = [];
 
   public addParticle = (layer: Particle) => {
     this.particles.push(layer);
   };
+}
+
+export interface ParticlesToMovementsSettings {
+  // How long to wait at each particle before moving on.
+  stopDelay?: number;
+
+  // Pass through the point in the directino of its velocity.
+  drawInVelocityOrientation?: boolean;
 }
 
 export class Particles {
@@ -31,6 +40,41 @@ export class Particles {
 
   public addSystem = (layer: ParticleSystem) => {
     this.systems.push(layer);
+  };
+
+  public toMovements = (settings: ParticlesToMovementsSettings) => {
+    const movements: Movement[] = [];
+
+    for (const system of this.systems) {
+      for (const particle of system.particles) {
+        // Convert the location to a Vector3
+        const location = new Vector3(
+          particle.location[0],
+          particle.location[1],
+          particle.location[2]
+        );
+
+        const point = new Point(
+          location,
+          settings.stopDelay ?? 0,
+          system.material
+        );
+
+        if (settings.drawInVelocityOrientation) {
+          const direction = new Vector3(
+            particle.velocity[0],
+            particle.velocity[1],
+            particle.velocity[2]
+          ).normalize();
+
+          point.direction = direction;
+        }
+
+        movements.push(point);
+      }
+    }
+
+    return movements;
   };
 }
 

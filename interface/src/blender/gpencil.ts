@@ -1,5 +1,6 @@
-import { Color, Vector3 } from "three";
+import { Vector3 } from "three";
 import { MaterialJSON } from "./material";
+import { Point, Movement, Line, OrderedMovements } from "./movements/movements";
 
 export class GPencilLayer {
   public strokes: GPencilStroke[] = [];
@@ -36,6 +37,13 @@ export interface GPencilStrokePoint {
   vertexColor: [number, number, number, number]; // Vertex color
 }
 
+export interface GPencilSettings {
+  /**
+   * If enabled, strokes are broken up into singular lines that may be individually optimised.
+   */
+  breakUpStrokes?: boolean;
+}
+
 export class GPencil {
   constructor(public name: string) {}
 
@@ -44,14 +52,53 @@ export class GPencil {
   public addLayer = (layer: GPencilLayer) => {
     this.layers.push(layer);
   };
+
+  public toMovements = (settings: GPencilSettings) => {
+    const movements: Movement[] = [];
+
+    for (const layer of this.layers) {
+      for (const stroke of layer.strokes) {
+        let lastPoint = new Vector3(
+          stroke.points[0].co[0],
+          stroke.points[0].co[1],
+          stroke.points[0].co[2]
+        );
+
+        const orderedMovements = new OrderedMovements();
+
+        for (let index = 0; index < stroke.points.length; index++) {
+          const point = stroke.points[index];
+          const co = point.co;
+
+          let currentPoint = new Vector3(co[0], co[1], co[2]);
+
+          // Create a line from the lastPoint to the currentPoint
+          const line = new Line(lastPoint, currentPoint, layer.material);
+          orderedMovements.addMovement(line);
+
+          lastPoint = currentPoint;
+
+          // TODO: Read vertex colours and mix into the layer material
+        }
+
+        if (settings.breakUpStrokes) {
+          movements.push(...orderedMovements.movements);
+        } else {
+          movements.push(orderedMovements);
+        }
+      }
+    }
+
+    return movements;
+  };
 }
 
 export interface GPencilJSON {
   type: "gpencil";
   name: string;
   layers: {
-    material: MaterialJSON;
     info: string;
+    material: MaterialJSON;
     strokes: {
       useCyclic: boolean;
       points: {
