@@ -62,25 +62,34 @@ def serialise_float(f: float):
 def slugify(name: str):
     return re.sub(r'[\W_]+', '_', name.lower())
 
-def grease_pencil_export(self, context):
+
+def grease_pencil_export(self, context, frame_number: int):
     gp_obj = bpy.context.view_layer.objects.active
     gp_layers = gp_obj.data.layers
 
-    print("grease pencil gp_obj", gp_obj)
+    save_struct = dict({
+        "type": "gpencil",
+        "layers": [],
+    })
 
     for layer in gp_layers:
         layer: bpy.types.GPencilLayer
 
         col: mathutils.Color = layer.color
 
+        layer_struct = dict({
+            "color": serialise_color(col),
+            "info": layer.info,
+            "strokes": [],
+        })
+        save_struct["layers"].append(layer_struct)
+
         for frame in layer.frames:
             frame: bpy.types.GPencilFrame
 
-            save_struct = dict({
-                "type": "gpencil",
-                "strokes": [],
-                "color": serialise_color(col)
-            })
+            # Only do this frame
+            if frame.frame_number != frame_number:
+                continue
 
             for stroke in frame.strokes:
                 # A stroke is a collection of points, between which lines may be drawn
@@ -92,14 +101,12 @@ def grease_pencil_export(self, context):
                     "useCyclic": stroke.use_cyclic,
                     "points": []
                 })
-                save_struct["strokes"].append(stroke_struct)
+                layer_struct["strokes"].append(stroke_struct)
 
                 points: bpy.types.GPencilStrokePoints = stroke.points
 
                 for point in points:
                     point: bpy.types.GPencilStrokePoint
-
-                    print(point.co, point.vertex_color)
 
                     point_struct = dict({
                         "co": serialise_vector(point.co),
@@ -109,12 +116,8 @@ def grease_pencil_export(self, context):
                     })
                     stroke_struct["points"].append(point_struct)
 
-                    # point.vertex_color = stroke_col
-
-            # Save the frame
-            save_file(get_output_filepath(context, frame.frame_number, gp_obj.name), save_struct)
-
-        print("Selected grease pencil layer", layer, col)
+    # Save the frame
+    save_file(get_output_filepath(context, frame_number, gp_obj.name), save_struct)
 
 def get_random_color():
     ''' generate rgb using a list comprehension '''
@@ -145,13 +148,28 @@ class OBJECT_OT_TPVExport(Operator):
         for selObj in selObjs:
             selObj.select_set(False)
 
-        # Run through every object, run the corresponding command
-        for selObj in selObjs:
-            if selObj.type == "GPENCIL":
-                bpy.ops.object.select_all(action='DESELECT')
-                selObj.select_set(True)
-                bpy.context.view_layer.objects.active = selObj
+        # For every frame, save every object
+        start_frame = bpy.context.scene.frame_start
+        end_frame = bpy.context.scene.frame_end
 
-                grease_pencil_export(self, bpy.context)
+        # Select the window manager
+        wm: bpy.types.context.window_manager = bpy.context.window_manager
+
+        # Start the progress bar
+        wm.progress_begin(start_frame, end_frame)
+
+        for frame_number in range(start_frame, end_frame):
+            # Update the progress bar
+            wm.progress_update(frame_number)
+            # Run through every object, run the corresponding command
+            for selObj in selObjs:
+                if selObj.type == "GPENCIL":
+                    bpy.ops.object.select_all(action='DESELECT')
+                    selObj.select_set(True)
+                    bpy.context.view_layer.objects.active = selObj
+
+                    grease_pencil_export(self, bpy.context, frame_number)
+
+        wm.progress_end()
 
         return {'FINISHED'}
