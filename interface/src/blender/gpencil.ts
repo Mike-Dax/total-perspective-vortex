@@ -1,6 +1,6 @@
 import { Vector3 } from "three";
 import { MaterialJSON } from "./material";
-import { Point, Movement, Line, OrderedMovements } from "./movements/movements";
+import { Point, Movement, Line, MovementGroup } from "./movements/movements";
 
 export class GPencilLayer {
   public strokes: GPencilStroke[] = [];
@@ -53,7 +53,7 @@ export class GPencil {
     this.layers.push(layer);
   };
 
-  public toMovements = (settings: GPencilSettings) => {
+  public toMovements = (settings: GPencilSettings = {}) => {
     const movements: Movement[] = [];
 
     for (const layer of this.layers) {
@@ -64,7 +64,7 @@ export class GPencil {
           stroke.points[0].co[2]
         );
 
-        const orderedMovements = new OrderedMovements();
+        const orderedMovements = new MovementGroup();
 
         for (let index = 0; index < stroke.points.length; index++) {
           const point = stroke.points[index];
