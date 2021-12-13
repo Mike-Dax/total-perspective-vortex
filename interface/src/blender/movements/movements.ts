@@ -22,6 +22,11 @@ export abstract class Movement {
   };
 
   /**
+   * Get the length of this movement in mm
+   */
+  abstract getLength: () => number;
+
+  /**
    * Get the starting position of this movement
    */
   abstract getStart: () => Vector3;
@@ -33,11 +38,11 @@ export abstract class Movement {
   /**
    * Get the desired entry direction of this movement
    */
-  abstract getDesiredEntryDirection: () => Vector3 | null;
+  abstract getDesiredEntryVelocity: () => Vector3;
   /**
    * Get the desired exit direction of this movement
    */
-  abstract getExpectedExitDirection: () => Vector3 | null;
+  abstract getExpectedExitVelocity: () => Vector3;
 }
 
 export type DenseMovements = Movement[] & { __dense: true };
@@ -75,6 +80,17 @@ export class MovementGroup extends Movement {
     }
   };
 
+  public getLength: () => number = () => {
+    if (this.movements.length === 0) {
+      return 0;
+    }
+
+    return this.movements.reduce(
+      (len, movement) => movement.getLength() + len,
+      0
+    );
+  };
+
   public getStart = () => {
     if (this.movements.length === 0) {
       throw new Error("OrderedMovements is empty, but getStart was called");
@@ -91,24 +107,24 @@ export class MovementGroup extends Movement {
     return this.movements[this.movements.length - 1].getEnd();
   };
 
-  public getDesiredEntryDirection = () => {
+  public getDesiredEntryVelocity = () => {
     if (this.movements.length === 0) {
       throw new Error(
-        "OrderedMovements is empty, but getDesiredEntryDirection was called"
+        "OrderedMovements is empty, but getDesiredEntryVelocity was called"
       );
     }
 
-    return this.movements[0].getDesiredEntryDirection();
+    return this.movements[0].getDesiredEntryVelocity();
   };
 
-  public getExpectedExitDirection = () => {
+  public getExpectedExitVelocity = () => {
     if (this.movements.length === 0) {
       throw new Error(
-        "OrderedMovements is empty, but getExpectedExitDirection was called"
+        "OrderedMovements is empty, but getExpectedExitVelocity was called"
       );
     }
 
-    return this.movements[this.movements.length - 1].getExpectedExitDirection();
+    return this.movements[this.movements.length - 1].getExpectedExitVelocity();
   };
 }
 
@@ -139,6 +155,10 @@ export class Line extends Movement {
     // TODO: Flip the material
   };
 
+  public getLength: () => number = () => {
+    return this.from.distanceTo(this.to);
+  };
+
   public getStart = () => {
     return this.from;
   };
@@ -147,12 +167,12 @@ export class Line extends Movement {
     return this.to;
   };
 
-  public getDesiredEntryDirection = () => {
-    return this.to.clone().sub(this.from).normalize();
+  public getDesiredEntryVelocity = () => {
+    return this.to.clone().sub(this.from); // .normalize();
   };
 
-  public getExpectedExitDirection = () => {
-    return this.to.clone().sub(this.from).normalize();
+  public getExpectedExitVelocity = () => {
+    return this.to.clone().sub(this.from); // .normalize();
   };
 }
 
@@ -166,8 +186,8 @@ export function isPoint(movement: Movement): movement is Point {
 export class Point extends Movement {
   readonly type = "point";
 
-  // For a particle, approach in the direction of its velocity
-  public direction: Vector3 | null = null;
+  // For a particle, approach in the velocity of its velocity
+  public velocity: Vector3 = new Vector3(0, 0, 0);
 
   constructor(
     public pos: Vector3,
@@ -182,6 +202,10 @@ export class Point extends Movement {
 
   // TODO: A boolean to indicate a movement doesn't gain anything from flipping?
 
+  public getLength: () => number = () => {
+    return 0;
+  };
+
   public getStart = () => {
     return this.pos;
   };
@@ -190,12 +214,12 @@ export class Point extends Movement {
     return this.pos;
   };
 
-  public getDesiredEntryDirection = () => {
-    return this.direction;
+  public getDesiredEntryVelocity = () => {
+    return this.velocity;
   };
 
-  public getExpectedExitDirection = () => {
-    return this.direction;
+  public getExpectedExitVelocity = () => {
+    return this.velocity;
   };
 }
 
@@ -204,22 +228,16 @@ export function isTransition(movement: Movement): movement is Transition {
 }
 
 /**
- * A transition gets from one place to another with various additional constraints
+ * A transition is a move from one Movement to another.
  *
- * It can be constrained to have a starting or ending direction.
- * It can be constrained to being or end stopped.
+ * It's probably going to be a Cubic Bezier, with the scaled velocity components as control points
  */
 export class Transition extends Movement {
   readonly type = "transition";
 
-  public startingDirection: Vector3 | null = null;
-  public endingDirection: Vector3 | null = null;
-  public startStopped: boolean = false;
-  public endStopped: boolean = false;
-
   constructor(
-    public from: Vector3,
-    public to: Vector3,
+    public from: Movement,
+    public to: Movement,
     public material: MaterialJSON
   ) {
     super();
@@ -231,30 +249,28 @@ export class Transition extends Movement {
     this.to = this.from;
     this.from = temp;
 
-    const tempDir = this.startingDirection;
-    this.startingDirection = this.endingDirection;
-    this.endingDirection = tempDir;
-
-    const tempStopped = this.startStopped;
-    this.startStopped = this.endStopped;
-    this.endStopped = tempStopped;
-
     // TODO: Flip the material
   };
 
+  public getLength: () => number = () => {
+    // TODO: What kind of curve is this, create it,
+
+    return 0;
+  };
+
   public getStart = () => {
-    return this.from;
+    return this.from.getEnd();
   };
 
   public getEnd = () => {
-    return this.to;
+    return this.to.getStart();
   };
 
-  public getDesiredEntryDirection = () => {
-    return this.startingDirection;
+  public getDesiredEntryVelocity = () => {
+    return this.from.getExpectedExitVelocity();
   };
 
-  public getExpectedExitDirection = () => {
-    return this.endingDirection;
+  public getExpectedExitVelocity = () => {
+    return this.to.getDesiredEntryVelocity();
   };
 }
