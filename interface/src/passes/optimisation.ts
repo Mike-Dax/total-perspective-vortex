@@ -15,6 +15,8 @@ export interface OptimisationSettings {
 
   startingPoint: Vector3;
   endingPoint: Vector3;
+
+  maxSpeed: number; // mm/s
 }
 
 /**
@@ -31,47 +33,23 @@ export function sparseToDense(
     color: [0, 0, 0, 0],
   };
 
-  let lastMovement: Movement = new Point(
+  // Start
+
+  let previousMovement: Movement = new Point(
     settings.startingPoint,
     settings.waitAtStartDuration,
     blankMaterial
   );
 
+  // Middle
+
   for (const movement of sparseBag) {
-    // Check if the movement starts in the same position
-    if (movement.getStart().equals(lastMovement.getEnd())) {
-      // we're already here, no transition move necessary,
-
-      // add the movement to the dense list,
-      denseMovements.push(movement);
-
-      // Update the last movement
-      lastMovement = movement;
-      continue;
-    }
-
-    // Build a cubic bezier starting at the lastPosition, ending at the startPosition of the movement
+    // Build our transition movement from the old movement to the new
     const transition = new Transition(
-      lastMovement.getEnd(),
-      movement.getStart(),
+      previousMovement,
+      movement,
       blankMaterial
     );
-
-    // Set the starting and ending directions, which will be formed into control points later
-    transition.startingDirection = lastMovement.getExpectedExitDirection();
-    transition.endingDirection = movement.getDesiredEntryDirection();
-
-    // If the last movement was a point, we might start stopped
-    if (isPoint(lastMovement) && lastMovement.duration === 0) {
-      // Transition should start stopped
-      transition.startStopped = true;
-    }
-
-    // If the next movement is a point, we might need to end stopped
-    if (isPoint(movement) && movement.duration === 0) {
-      // Transition should start stopped
-      transition.endStopped = true;
-    }
 
     // Add the transition to the dense bag
     denseMovements.push(transition);
@@ -80,9 +58,30 @@ export function sparseToDense(
     denseMovements.push(movement);
 
     // Update the last movement
-    lastMovement = movement;
+    previousMovement = movement;
     continue;
   }
+
+  // End
+
+  let lastMovement: Movement = new Point(
+    settings.endingPoint,
+    settings.waitAtStartDuration,
+    blankMaterial
+  );
+
+  // Transition to the end
+  const transitionToEnd = new Transition(
+    previousMovement,
+    lastMovement,
+    blankMaterial
+  );
+
+  // Add the transition to the dense bag
+  denseMovements.push(transitionToEnd);
+
+  // Add the movement to the dense bag
+  denseMovements.push(lastMovement);
 
   return denseMovements;
 }
