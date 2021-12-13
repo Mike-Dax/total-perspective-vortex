@@ -19,9 +19,7 @@ export abstract class Movement {
    *
    * By default just adds itself to the array
    */
-  public flatten = (add: (movement: Movement) => void) => {
-    add(this);
-  };
+  abstract flatten: () => Movement[];
 
   /**
    * Get the length of this movement in mm
@@ -86,10 +84,12 @@ export class MovementGroup extends Movement {
     this.movements.reverse();
   };
 
-  public flatten = (add: (movement: Movement) => void) => {
+  public flatten = () => {
+    const movements = [];
     for (const movement of this.movements) {
-      add(movement);
+      movements.push(...movement.flatten());
     }
+    return movements;
   };
 
   public getLength: () => number = () => {
@@ -181,12 +181,16 @@ export class Line extends Movement {
   }
 
   // Swap the ordering of these points
-  flip = () => {
+  public flip = () => {
     const temp = this.to;
     this.to = this.from;
     this.from = temp;
 
     // TODO: Flip the material
+  };
+
+  public flatten = () => {
+    return [this];
   };
 
   public getLength: () => number = () => {
@@ -250,9 +254,11 @@ export class Point extends Movement {
   }
 
   // Flipping a Point does nothing
-  flip = () => {};
+  public flip = () => {};
 
-  // TODO: A boolean to indicate a movement doesn't gain anything from flipping?
+  public flatten = () => {
+    return [this];
+  };
 
   public getLength: () => number = () => {
     return 0;
@@ -339,16 +345,22 @@ export class Transition extends Movement {
       this.getEnd()
     );
 
+    this.curve.arcLengthDivisions = 20; // divide into 20 segments for length calculations
+
     return this.curve;
   };
 
   // Swap the ordering of this transition movement
-  flip = () => {
+  public flip = () => {
     const temp = this.to;
     this.to = this.from;
     this.from = temp;
 
     // TODO: Flip the material
+  };
+
+  public flatten = () => {
+    return [this];
   };
 
   public getLength = () => {

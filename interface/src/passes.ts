@@ -1,4 +1,4 @@
-import { MaterialJSON } from "src/blender/material";
+import { blankMaterial, MaterialJSON } from "./blender/material";
 import { Material, Vector3 } from "three";
 import {
   declareDense,
@@ -8,7 +8,7 @@ import {
   Movement,
   Point,
   Transition,
-} from "../blender/movements/movements";
+} from "./blender/movements/movements";
 
 export interface OptimisationSettings {
   waitAtStartDuration: number;
@@ -27,11 +27,6 @@ export function sparseToDense(
   settings: OptimisationSettings
 ): DenseMovements {
   const denseMovements: DenseMovements = declareDense([]);
-
-  const blankMaterial: MaterialJSON = {
-    type: "color",
-    color: [0, 0, 0, 0],
-  };
 
   // Start
   let previousMovement: Movement = new Point(
@@ -93,7 +88,7 @@ export function flattenDense(denseBag: DenseMovements): DenseMovements {
   let denseFlatList: DenseMovements = declareDense([]);
 
   for (const movement of denseBag) {
-    movement.flatten(denseFlatList.push);
+    denseFlatList.push(...movement.flatten());
   }
 
   return denseBag;
@@ -138,9 +133,9 @@ function swapIsBetter(
   // Calculate the new cost
   const tourCostWithSwap = sparseToCost(movements, settings);
 
-  console.log(
-    `trying to swap ${i} and ${j}, cost flipped is ${tourCostWithSwap}, without is ${costRef.cost}.`
-  );
+  // console.log(
+  //   `trying to swap ${i} and ${j}, cost flipped is ${tourCostWithSwap}, without is ${costRef.cost}.`
+  // );
 
   // if it's worse or equal, swap it back
   if (tourCostWithSwap >= costRef.cost) {
@@ -162,15 +157,20 @@ function flipIsBetter(
   settings: OptimisationSettings,
   i: number
 ): boolean {
+  // If the movement is a Point, we can't flip, bail early
+  if (isPoint(movements[i])) {
+    return false;
+  }
+
   // Do the flip
   movements[i].flip();
 
   // Calculate the new cost
   const tourCostWithFlip = sparseToCost(movements, settings);
 
-  console.log(
-    `trying to flip ${i}, cost flipped is ${tourCostWithFlip}, without is ${costRef.cost}.`
-  );
+  // console.log(
+  //   `trying to flip ${i}, cost flipped is ${tourCostWithFlip}, without is ${costRef.cost}.`
+  // );
 
   // if it's worse or equal, swap it back
   if (tourCostWithFlip >= costRef.cost) {
@@ -183,13 +183,20 @@ function flipIsBetter(
   return true;
 }
 
+/**
+ * Reorders and flips the members of a sparse bag of movements, optimising for the fastest tour.
+ *
+ * Modifies the array in place, returns the expected cost?
+ */
 export function optimise(
   sparseBag: Movement[],
   settings: OptimisationSettings
-): Movement[] {
+): number {
   const sparseLength = sparseBag.length;
 
   let costRef = { cost: sparseToCost(sparseBag, settings) };
+
+  const startingCost = costRef.cost;
 
   let improved = true;
 
@@ -199,7 +206,15 @@ export function optimise(
     improved = false;
 
     iteration: for (let i = 0; i < sparseLength - 1; i++) {
-      console.log(iteration++);
+      console.log(
+        `iteration: ${iteration++},`,
+        `depth: ${i},`,
+        `current cost: ${Math.round(costRef.cost * 100) / 100}, ${
+          Math.round(
+            ((startingCost - costRef.cost) / Math.abs(costRef.cost)) * 10000
+          ) / 100
+        }% decrease`
+      );
       for (let j = i + 1; j < sparseLength; j++) {
         // Try flipping each member first
         if (flipIsBetter(sparseBag, costRef, settings, i)) {
@@ -230,5 +245,5 @@ export function optimise(
     }
   }
 
-  return [];
+  return costRef.cost;
 }
