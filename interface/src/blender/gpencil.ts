@@ -1,13 +1,14 @@
 import { Color, Vector3 } from "three";
+import { MaterialJSON } from "./material";
 
 export class GPencilLayer {
   public strokes: GPencilStroke[] = [];
-  public color: [number, number, number];
+  public material: MaterialJSON;
   public info: string;
 
-  constructor(info: string, color: [number, number, number]) {
+  constructor(info: string, material: MaterialJSON) {
     this.info = info;
-    this.color = color;
+    this.material = material;
   }
 
   public addStroke = (stroke: GPencilStroke) => {
@@ -36,7 +37,7 @@ export interface GPencilStrokePoint {
 }
 
 export class GPencil {
-  constructor() {}
+  constructor(public name: string) {}
 
   private layers: GPencilLayer[] = [];
 
@@ -47,8 +48,9 @@ export class GPencil {
 
 export interface GPencilJSON {
   type: "gpencil";
+  name: string;
   layers: {
-    color: [number, number, number];
+    material: MaterialJSON;
     info: string;
     strokes: {
       useCyclic: boolean;
@@ -63,10 +65,10 @@ export interface GPencilJSON {
 }
 
 export function importGPencil(json: GPencilJSON) {
-  const gPencil = new GPencil();
+  const gPencil = new GPencil(json.name);
 
   for (const jLayer of json.layers) {
-    let layer = new GPencilLayer(jLayer.info, jLayer.color);
+    let layer = new GPencilLayer(jLayer.info, jLayer.material);
     gPencil.addLayer(layer);
 
     for (const jStroke of jLayer.strokes) {
