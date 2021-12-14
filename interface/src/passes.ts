@@ -1,5 +1,5 @@
-import { blankMaterial, MaterialJSON } from "./blender/material";
-import { Material, Vector3 } from "three";
+import { blankMaterial, Material } from "./blender/material";
+import { Vector3 } from "three";
 import {
   declareDense,
   DenseMovements,
@@ -17,6 +17,9 @@ export interface OptimisationSettings {
   endingPoint: Vector3;
 
   maxSpeed: number; // mm/s
+
+  // The material to use for transitions
+  transitionMaterial: Material;
 }
 
 /**
@@ -32,7 +35,7 @@ export function sparseToDense(
   let previousMovement: Movement = new Point(
     settings.startingPoint,
     settings.waitAtStartDuration,
-    blankMaterial
+    settings.transitionMaterial
   );
 
   // Middle
@@ -44,7 +47,7 @@ export function sparseToDense(
     const transition = new Transition(
       previousMovement,
       movement,
-      blankMaterial
+      settings.transitionMaterial
     );
 
     // Add the transition to the dense bag
@@ -62,14 +65,14 @@ export function sparseToDense(
   let lastMovement: Movement = new Point(
     settings.endingPoint,
     settings.waitAtStartDuration,
-    blankMaterial
+    settings.transitionMaterial
   );
 
   // Transition to the end
   const transitionToEnd = new Transition(
     previousMovement,
     lastMovement,
-    blankMaterial
+    settings.transitionMaterial
   );
 
   // Add the transition to the dense bag
@@ -105,10 +108,14 @@ export function sparseToCost(
   const flattened = flattenDense(dense);
 
   // For now, use the total duration as the cost function
-  return flattened.reduce(
-    (duration, movement) => movement.getDuration() + duration,
-    0
-  );
+  let cost = 0;
+
+  for (let index = 0; index < flattened.length; index++) {
+    const movement = flattened[index];
+    cost += movement.getDuration();
+  }
+
+  return cost;
 }
 
 function swap(array: any[], a: number, b: number) {
@@ -196,6 +203,9 @@ export function optimise(
 
   let costRef = { cost: sparseToCost(sparseBag, settings) };
 
+  // randomise starting order
+  // sparseBag.sort((movement) => Math.random() - 0.5);
+
   const startingCost = costRef.cost;
 
   let improved = true;
@@ -246,4 +256,11 @@ export function optimise(
   }
 
   return costRef.cost;
+}
+
+export function toolpath(denseMovements: DenseMovements) {
+  // each movement should have a generateToolpath mmethod
+  for (const movement of denseMovements) {
+    // movement.generateToolpath();
+  }
 }

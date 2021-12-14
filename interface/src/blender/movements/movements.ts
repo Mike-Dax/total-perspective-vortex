@@ -1,5 +1,12 @@
 import { CubicBezierCurve3, Vector3 } from "three";
-import { MaterialJSON } from "../material";
+import { Material } from "../material";
+import {
+  LightMove,
+  MovementMove,
+  MovementMoveReference,
+  MovementMoveType,
+} from "./hardware";
+import { LRUCache } from "typescript-lru-cache";
 
 const defaultSpeed = 30; // mm/s
 
@@ -53,6 +60,16 @@ export abstract class Movement {
    * Get the desired exit direction of this movement
    */
   abstract getExpectedExitVelocity: () => Vector3;
+
+  /**
+   * Given a movement ID, generate the final movement(s) for sending to hardware
+   */
+  abstract generateToolpath: (id: number) => MovementMove[];
+
+  /**
+   * Given a movement ID, generate the light moves for this movement, (defer to materials).
+   */
+  abstract generateLightpath: (id: number) => LightMove[];
 }
 
 export type DenseMovements = Movement[] & { __dense: true };
@@ -159,6 +176,18 @@ export class MovementGroup extends Movement {
 
     return this.movements[this.movements.length - 1].getExpectedExitVelocity();
   };
+
+  public generateToolpath = (id: number) => {
+    throw new Error(
+      "generateToolpath called on MovementGroup, the movement bag should have been flattened"
+    );
+  };
+
+  public generateLightpath = (id: number) => {
+    throw new Error(
+      "generateLightpath called on MovementGroup, the movement bag should have been flattened"
+    );
+  };
 }
 
 export function isLine(movement: Movement): movement is Line {
@@ -175,7 +204,7 @@ export class Line extends Movement {
   constructor(
     public from: Vector3,
     public to: Vector3,
-    public material: MaterialJSON
+    public material: Material
   ) {
     super();
   }
@@ -229,6 +258,23 @@ export class Line extends Movement {
       .normalize()
       .multiplyScalar(this.maxSpeed);
   };
+
+  public generateToolpath = (id: number) => {
+    const move: MovementMove = {
+      id,
+      duration: this.getDuration(),
+      type: MovementMoveType.LINE,
+      reference: MovementMoveReference.ABSOLUTE,
+      points: [this.getStart().toArray(), this.getEnd().toArray()],
+      num_points: 2,
+    };
+
+    return [move];
+  };
+
+  public generateLightpath = (id: number) => {
+    return this.material.generateLightpath(id, this);
+  };
 }
 
 export function isPoint(movement: Movement): movement is Point {
@@ -248,7 +294,7 @@ export class Point extends Movement {
   constructor(
     public pos: Vector3,
     public duration: number, // Can be 0, for a 'passthrough'
-    public material: MaterialJSON
+    public material: Material
   ) {
     super();
   }
@@ -304,11 +350,40 @@ export class Point extends Movement {
   public getExpectedExitVelocity = () => {
     return this.velocity.normalize().multiplyScalar(this.maxSpeed);
   };
+
+  public generateToolpath = (id: number) => {
+    const move: MovementMove = {
+      id,
+      duration: this.getDuration(),
+      type: MovementMoveType.LINE, // Despite being a point, draw a line
+      reference: MovementMoveReference.ABSOLUTE,
+      points: [this.getStart().toArray(), this.getEnd().toArray()],
+      num_points: 2,
+    };
+
+    return [move];
+  };
+
+  public generateLightpath = (id: number) => {
+    return this.material.generateLightpath(id, this);
+  };
 }
 
 export function isTransition(movement: Movement): movement is Transition {
   return movement.type === "transition";
 }
+
+const transitionCurveCache = new LRUCache<string, number>({
+  maxSize: 1000, // store 1000 lengths by default
+});
+
+function transitionKeygen(a: Vector3, b: Vector3, c: Vector3, d: Vector3) {
+  return `[${a.toArray().join(",")}][${b.toArray().join(",")}][${c
+    .toArray()
+    .join(",")}][${d.toArray().join(",")}]`;
+}
+
+let cacheHits = 0;
 
 /**
  * A transition is a move from one Movement to another.
@@ -322,7 +397,7 @@ export class Transition extends Movement {
   constructor(
     public from: Movement,
     public to: Movement,
-    public material: MaterialJSON
+    public material: Material
   ) {
     super();
   }
@@ -364,10 +439,25 @@ export class Transition extends Movement {
   };
 
   public getLength = () => {
-    // TODO: What kind of curve is this, create it,
-    const curve = this.lazyGenerateCurve();
+    // Check if we have a cached length first since this is expensive.
+    const key = transitionKeygen(
+      this.getStart(),
+      this.getEnd(),
+      this.getDesiredEntryVelocity(),
+      this.getExpectedExitVelocity()
+    );
 
-    return curve.getLength();
+    const cached = transitionCurveCache.get(key);
+
+    if (cached) return cached;
+
+    // Otherwise generate the curve, get the length
+    const curve = this.lazyGenerateCurve();
+    const length = curve.getLength();
+
+    transitionCurveCache.set(key, length);
+
+    return length;
   };
 
   public setMaxSpeed = (maxSpeed: number) => {
@@ -392,5 +482,27 @@ export class Transition extends Movement {
 
   public getExpectedExitVelocity = () => {
     return this.to.getDesiredEntryVelocity();
+  };
+
+  public generateToolpath = (id: number) => {
+    const move: MovementMove = {
+      id,
+      duration: this.getDuration(),
+      type: MovementMoveType.BEZIER_CUBIC, // Despite being a point, draw a line
+      reference: MovementMoveReference.ABSOLUTE,
+      points: [
+        this.getStart().toArray(),
+        this.getStart().clone().add(this.getDesiredEntryVelocity()).toArray(),
+        this.getEnd().clone().sub(this.getExpectedExitVelocity()).toArray(),
+        this.getEnd().toArray(),
+      ],
+      num_points: 4,
+    };
+
+    return [move];
+  };
+
+  public generateLightpath = (id: number) => {
+    return this.material.generateLightpath(id, this);
   };
 }

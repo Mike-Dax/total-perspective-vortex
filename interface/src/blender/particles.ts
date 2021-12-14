@@ -1,5 +1,5 @@
 import { Color, Vector3 } from "three";
-import { MaterialJSON } from "./material";
+import { importMaterial, MaterialJSON } from "./material";
 import { Point, Line, Movement, MovementGroup } from "./movements/movements";
 
 export interface ParticlesStrokePoint {
@@ -46,6 +46,8 @@ export class Particles {
     const movements: Movement[] = [];
 
     for (const system of this.systems) {
+      const material = importMaterial(system.material);
+
       for (const particle of system.particles) {
         // Convert the location to a Vector3
         const location = new Vector3(
@@ -54,11 +56,7 @@ export class Particles {
           particle.location[2]
         );
 
-        const point = new Point(
-          location,
-          settings.stopDelay ?? 0,
-          system.material
-        );
+        const point = new Point(location, settings.stopDelay ?? 0, material);
 
         if (settings.drawInVelocityOrientation) {
           point.velocity.set(

@@ -1,5 +1,5 @@
 import { Vector3 } from "three";
-import { MaterialJSON } from "./material";
+import { importMaterial, MaterialJSON } from "./material";
 import { Point, Movement, Line, MovementGroup } from "./movements/movements";
 
 export class GPencilLayer {
@@ -73,7 +73,11 @@ export class GPencil {
           let currentPoint = new Vector3(co[0], co[1], co[2]);
 
           // Create a line from the lastPoint to the currentPoint
-          const line = new Line(lastPoint, currentPoint, layer.material);
+          const line: Movement = new Line(
+            lastPoint,
+            currentPoint,
+            importMaterial(layer.material)
+          );
           orderedMovements.addMovement(line);
 
           lastPoint = currentPoint;

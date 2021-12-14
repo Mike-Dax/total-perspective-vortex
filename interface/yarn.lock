@@ -1426,6 +1426,13 @@ __metadata:
   languageName: node
   linkType: hard
 
+"chromaticity-color-utilities@npm:^0.2.8-alpha":
+  version: 0.2.8-alpha
+  resolution: "chromaticity-color-utilities@npm:0.2.8-alpha"
+  checksum: cc2904df2b09547743d16f4e6c1d9f6c5c7ea73025fb43bc12a1f0a4751de02f203f9e6461bc16bf77c76381fcb7695fcf0b5d7a9be419d5bf2a1394c956d1a2
+  languageName: node
+  linkType: hard
+
 "ci-info@npm:^3.2.0":
   version: 3.3.0
   resolution: "ci-info@npm:3.3.0"
@@ -3851,11 +3858,13 @@ __metadata:
     "@types/jest": ^27.0.3
     "@types/node": ^16.11.12
     "@types/three": 0.135.0
+    chromaticity-color-utilities: ^0.2.8-alpha
     jest: ^27.4.4
     three: 0.135.0
     ts-jest: ^27.1.1
     ts-node: ^10.4.0
     typescript: ^4.5.3
+    typescript-lru-cache: ^1.2.3
   languageName: unknown
   linkType: soft
 
@@ -3978,6 +3987,13 @@ __metadata:
   dependencies:
     is-typedarray: ^1.0.0
   checksum: 99c11aaa8f45189fcfba6b8a4825fd684a321caa9bd7a76a27cf0c7732c174d198b99f449c52c3818107430b5f41c0ccbbfb75cb2ee3ca4a9451710986d61a60
+  languageName: node
+  linkType: hard
+
+"typescript-lru-cache@npm:^1.2.3":
+  version: 1.2.3
+  resolution: "typescript-lru-cache@npm:1.2.3"
+  checksum: 0f14f561ba3b6435d2f7c29f214e4316dea5229f7353649b10334e575e0728750a9e108676fcd463bfbc616f85ebb4543a026c99bd68a915c710005e4ba7fac8
   languageName: node
   linkType: hard
 
