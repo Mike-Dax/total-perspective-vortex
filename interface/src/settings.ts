@@ -1,30 +1,56 @@
 import { GPencilToMovementsSettings } from "./gpencil";
 import { Material } from "./material";
 import { ParticlesToMovementsSettings } from "./particles";
+import { Vector3 } from "three";
 
-export interface ToMovementSettings {
-  // Global object type overrides
-  gpencil: GPencilToMovementsSettings;
-  particles: ParticlesToMovementsSettings;
+export interface Settings {
+  // Global object type settings
+  objectSettings: {
+    gpencil: GPencilToMovementsSettings;
+    particles: ParticlesToMovementsSettings;
+  };
 
-  // Do object level overrides here. Particle subsystems can be `object -> subsystem name`
+  // Per-object overrides
   objectOverrides: {
     [objectName: string]:
       | Partial<GPencilToMovementsSettings>
       | Partial<ParticlesToMovementsSettings>;
   };
 
+  // Materials
+  transitionMaterial: Material;
   materialOverrides: MaterialOverrides;
+
+  // Optimisation settings
+  optimisation: OptimisationSettings;
+}
+
+export interface MaterialOverrides {
+  globalOveride: Material | null;
+
+  // Do object level material overrides here.
+  objectMaterialOverrides: {
+    [objectName: string]: Material;
+  };
+}
+
+export interface OptimisationSettings {
+  waitAtStartDuration: number;
+
+  startingPoint: Vector3;
+  endingPoint: Vector3;
+
+  maxSpeed: number; // mm/s
 }
 
 export function getToMovementSettings(
-  settings: ToMovementSettings,
+  settings: Settings,
   objType: "gpencil",
   overrideKeys: string[]
 ): GPencilToMovementsSettings;
 
 export function getToMovementSettings(
-  settings: ToMovementSettings,
+  settings: Settings,
   objType: "particles",
   overrideKeys: string[]
 ): ParticlesToMovementsSettings;
@@ -32,11 +58,11 @@ export function getToMovementSettings(
 export function getToMovementSettings<
   ReturnType = GPencilToMovementsSettings | ParticlesToMovementsSettings
 >(
-  settings: ToMovementSettings,
+  settings: Settings,
   objType: "gpencil" | "particles",
   overrideKeys: string[]
 ): ReturnType {
-  let objSettings = settings[objType];
+  let objSettings = settings.objectSettings[objType];
 
   // Iterate over every override key, merging in the layers
   for (const objName of overrideKeys) {
@@ -50,15 +76,6 @@ export function getToMovementSettings<
   }
 
   return objSettings as ReturnType;
-}
-
-export interface MaterialOverrides {
-  globalOveride: Material | null;
-
-  // Do object level material overrides here.
-  objectMaterialOverrides: {
-    [objectName: string]: Material;
-  };
 }
 
 export function getMaterialOverride(
@@ -81,12 +98,3 @@ export function getMaterialOverride(
 
   return mat;
 }
-
-// Have a function that searches for and merges in settings with this object, and a name
-// for use with the toMovements calls
-
-// These settings objects need to be serialisable, since they go over the bridge to the worker threads.
-
-// Have the UI populate this global settings object on a global, non-frame basis.
-
-// When we

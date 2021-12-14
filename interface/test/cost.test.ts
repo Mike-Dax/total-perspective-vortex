@@ -1,15 +1,9 @@
-import { blankMaterial } from "../src/blender/material";
-import { Point } from "../src/blender/movements/movements";
-import { OptimisationSettings, sparseToCost } from "../src/passes";
+import { blankMaterial } from "../src/material";
+import { Point } from "../src/movements";
+import { sparseToCost } from "../src/passes";
 import { Vector3 } from "three";
 
-const defaultSettings: OptimisationSettings = {
-  startingPoint: new Vector3(0, 0, 0),
-  endingPoint: new Vector3(0, 0, 0),
-  maxSpeed: 300,
-  waitAtStartDuration: 1000,
-  transitionMaterial: blankMaterial,
-};
+import { defaultSettings } from "./settings";
 
 describe("Cost function", () => {
   xit(`can cost a tour`, () => {

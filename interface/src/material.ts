@@ -1,5 +1,5 @@
-import { LightMove, LightMoveType } from "./movements/hardware";
-import { Movement } from "./movements/movements";
+import { LightMove, LightMoveType } from "./hardware";
+import { Movement } from "./movements";
 
 export function rgbToHsl(
   red: number,

@@ -1,11 +1,11 @@
 import { Vector3 } from "three";
 import { importMaterial, MaterialJSON } from "./material";
-import { Point, Movement, Line, MovementGroup } from "./movements/movements";
+import { Point, Movement, Line, MovementGroup } from "./movements";
 import {
   getMaterialOverride,
   getToMovementSettings,
-  ToMovementSettings,
-} from "./toMovements";
+  Settings,
+} from "./settings";
 
 export class GPencilLayer {
   public strokes: GPencilStroke[] = [];
@@ -59,7 +59,7 @@ export class GPencil {
     this.layers.push(layer);
   };
 
-  public toMovements = (settings: ToMovementSettings) => {
+  public toMovements = (settings: Settings) => {
     const movements: Movement[] = [];
 
     for (const layer of this.layers) {

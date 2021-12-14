@@ -1,9 +1,8 @@
-import { blankMaterial } from "../src/blender/material";
-import { Point } from "../src/blender/movements/movements";
+import { blankMaterial } from "../src/material";
+import { Point } from "../src/movements";
 import {
   flattenDense,
   getTotalDuration,
-  OptimisationSettings,
   optimise,
   sparseToCost,
   sparseToDense,
@@ -12,41 +11,15 @@ import {
 import { Vector3 } from "three";
 import obj_cube from "./fixtures/obj_gpencil.json";
 import obj_particles from "./fixtures/obj_particles_frame_3.json";
-import { GPencilJSON, importGPencil } from "../src/blender/gpencil";
-import { importParticles, ParticlesJSON } from "../src/blender/particles";
-import { ToMovementSettings } from "src/blender/toMovements";
-
-const defaultSettings: OptimisationSettings = {
-  startingPoint: new Vector3(0, 0, 0),
-  endingPoint: new Vector3(0, 0, 0),
-  maxSpeed: 300,
-  waitAtStartDuration: 1000,
-  transitionMaterial: blankMaterial,
-};
-
-const defaultToMovementSettings: ToMovementSettings = {
-  gpencil: {
-    breakUpStrokes: true,
-  },
-  particles: {
-    drawInVelocityOrientation: false,
-    stopDelay: 10,
-  },
-
-  // Do object level overrides here. Particle subsystems can be `object -> subsystem name`
-  objectOverrides: {},
-
-  materialOverrides: {
-    globalOveride: null,
-    objectMaterialOverrides: {},
-  },
-};
+import { GPencilJSON, importGPencil } from "../src/gpencil";
+import { importParticles, ParticlesJSON } from "../src/particles";
+import { defaultSettings } from "./settings";
 
 describe("Toolpath generation", () => {
   xit(`can optimise a cube`, () => {
     const cube = importGPencil(obj_cube as GPencilJSON);
 
-    const movements = cube.toMovements(defaultToMovementSettings);
+    const movements = cube.toMovements(defaultSettings);
 
     optimise(movements, defaultSettings);
 

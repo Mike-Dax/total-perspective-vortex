@@ -1,11 +1,11 @@
 import { Color, Vector3 } from "three";
 import { importMaterial, MaterialJSON } from "./material";
-import { Point, Line, Movement, MovementGroup } from "./movements/movements";
+import { Point, Line, Movement, MovementGroup } from "./movements";
 import {
   getMaterialOverride,
   getToMovementSettings,
-  ToMovementSettings,
-} from "./toMovements";
+  Settings,
+} from "./settings";
 
 export interface ParticlesStrokePoint {
   co: [number, number, number]; // position
@@ -48,7 +48,7 @@ export class Particles {
     this.systems.push(layer);
   };
 
-  public toMovements = (settings: ToMovementSettings) => {
+  public toMovements = (settings: Settings) => {
     const movements: Movement[] = [];
 
     for (const system of this.systems) {

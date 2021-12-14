@@ -1,5 +1,3 @@
-import { blankMaterial, Material } from "./blender/material";
-import { Vector3 } from "three";
 import {
   declareDense,
   DenseMovements,
@@ -8,45 +6,31 @@ import {
   Movement,
   Point,
   Transition,
-} from "./blender/movements/movements";
-import {
-  LightMove,
-  MovementMove,
-  MovementMoveReference,
-} from "./blender/movements/hardware";
+} from "./movements";
+import { LightMove, MovementMove, MovementMoveReference } from "./hardware";
 
-export interface OptimisationSettings {
-  waitAtStartDuration: number;
-
-  startingPoint: Vector3;
-  endingPoint: Vector3;
-
-  maxSpeed: number; // mm/s
-
-  // The material to use for transitions
-  transitionMaterial: Material;
-}
+import { Settings } from "./settings";
 
 /**
  * Add transition movements between each move if the start and the end are at different places
  */
 export function sparseToDense(
   sparseBag: Movement[],
-  settings: OptimisationSettings
+  settings: Settings
 ): DenseMovements {
   const denseMovements: DenseMovements = declareDense([]);
 
   // Start
   let previousMovement: Movement = new Point(
-    settings.startingPoint,
-    settings.waitAtStartDuration,
+    settings.optimisation.startingPoint,
+    settings.optimisation.waitAtStartDuration,
     settings.transitionMaterial
   );
 
   // Middle
   for (const movement of sparseBag) {
     // Set the max speed of the movement so velocities are scaled
-    movement.setMaxSpeed(settings.maxSpeed);
+    movement.setMaxSpeed(settings.optimisation.maxSpeed);
 
     // Build our transition movement from the old movement to the new
     const transition = new Transition(
@@ -68,7 +52,7 @@ export function sparseToDense(
 
   // End
   let lastMovement: Movement = new Point(
-    settings.endingPoint,
+    settings.optimisation.endingPoint,
     1, // wait for 1ms at the end
     settings.transitionMaterial
   );
@@ -119,7 +103,7 @@ export function getTotalDuration(denseMoves: DenseMovements) {
  */
 export function sparseToCost(
   sparseBag: Movement[],
-  settings: OptimisationSettings
+  settings: Settings
 ): number {
   const dense = sparseToDense(sparseBag, settings);
   const flattened = flattenDense(dense);
@@ -139,7 +123,7 @@ function swap(array: any[], a: number, b: number) {
 function swapIsBetter(
   movements: Movement[],
   costRef: { cost: number },
-  settings: OptimisationSettings,
+  settings: Settings,
   i: number,
   j: number
 ): boolean {
@@ -170,7 +154,7 @@ function swapIsBetter(
 function flipIsBetter(
   movements: Movement[],
   costRef: { cost: number },
-  settings: OptimisationSettings,
+  settings: Settings,
   i: number
 ): boolean {
   // If the movement is a Point, we can't flip, bail early
@@ -210,7 +194,7 @@ export interface OrderingCache {
  */
 export function optimise(
   sparseBag: Movement[],
-  settings: OptimisationSettings,
+  settings: Settings,
   orderingCache: OrderingCache = {}
 ) {
   const sparseLength = sparseBag.length;

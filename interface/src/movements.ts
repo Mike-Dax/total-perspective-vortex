@@ -1,5 +1,5 @@
 import { CubicBezierCurve3, Vector3 } from "three";
-import { Material } from "../material";
+import { Material } from "./material";
 import {
   LightMove,
   MovementMove,
