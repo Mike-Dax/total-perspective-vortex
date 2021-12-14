@@ -80,6 +80,8 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
         "layers": [],
     })
 
+    obj_name = slugify(gp_obj.name)
+
     for layer in gp_layers:
         layer: bpy.types.GPencilLayer
 
@@ -92,6 +94,8 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
         })
         save_struct["layers"].append(layer_struct)
 
+        layer_name = slugify(layer.info)
+
         for frame in layer.frames:
             frame: bpy.types.GPencilFrame
 
@@ -99,7 +103,11 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
             if frame.frame_number != frame_number:
                 continue
 
+            stroke_counter = 0
+
             for stroke in frame.strokes:
+                stroke_counter += 1
+
                 # A stroke is a collection of points, between which lines may be drawn
                 stroke: bpy.types.GPencilStroke
 
@@ -113,10 +121,15 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
                 points: bpy.types.GPencilStrokePoints = stroke.points
 
+                point_counter = 0
+
                 for point in points:
+                    point_counter += 1
+
                     point: bpy.types.GPencilStrokePoint
 
                     point_struct = dict({
+                        "id": "{obj_name}-{layer_name}-{stroke_counter}-{point_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter, point_counter=point_counter),
                         "co": serialise_position(point.co, context, gp_obj),
                         "pressure": serialise_float(point.pressure),
                         "strength": serialise_float(point.strength),
@@ -179,6 +192,8 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
     has_content = False
 
+    obj_name = slugify(pt_obj.name)
+
     material_slots = pt_obj.evaluated_get(deps_graph).material_slots
 
     for index, _ in enumerate(particle_systems):
@@ -196,11 +211,18 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
         })
         save_struct["systems"].append(system_struct)
 
+        system_name = slugify(ps.name)
+
+        counter = 0
+
         for particle in ps.particles:
+            counter += 1
+
             if particle.alive_state != "ALIVE": # enum in [‘DEAD’, ‘UNBORN’, ‘ALIVE’, ‘DYING’], default ‘DEAD’
                 continue
 
             particle_struct = dict({
+                "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
                 "location": serialise_position(particle.location, context, pt_obj),
                 "rotation": serialise_vector(particle.rotation),
                 "velocity": serialise_vector(particle.velocity)

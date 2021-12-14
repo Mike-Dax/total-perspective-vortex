@@ -15,43 +15,50 @@
           "useCyclic": false,
           "points": [
             {
-              "co": [1.0, 1.0, -1.0],
+              "id": "line_art-lines-1-1",
+              "co": [100, 100, -100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [1.0, 1.0, 1.0],
+              "id": "line_art-lines-1-2",
+              "co": [-100, 100, -100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [-1.0, 1.0, 1.0],
+              "id": "line_art-lines-1-3",
+              "co": [-100, 100, 100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [-1.0, -1.0, 1.0],
+              "id": "line_art-lines-1-4",
+              "co": [-100, -100, 100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [-1.0, -1.0, -1.0],
+              "id": "line_art-lines-1-5",
+              "co": [100, -100, 100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [1.0, -1.0, -1.0],
+              "id": "line_art-lines-1-6",
+              "co": [100, -100, -100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [1.0, 1.0, -1.0],
+              "id": "line_art-lines-1-7",
+              "co": [100, 100, -100],
               "pressure": 1.0,
               "strength": 1.0,
               "vertexColor": [0.0, 0.0, 0.0, 0.0]
@@ -62,22 +69,25 @@
           "useCyclic": false,
           "points": [
             {
-              "co": [1.0, 1.0, 1.0],
+              "id": "line_art-lines-2-1",
+              "co": [-100, 100, 100],
               "pressure": 1.0,
               "strength": 1.0,
-              "vertexColor": [1.0, 0.0, 0.0, 1.0]
+              "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [1.0, -1.0, 1.0],
+              "id": "line_art-lines-2-2",
+              "co": [100, 100, 100],
               "pressure": 1.0,
               "strength": 1.0,
-              "vertexColor": [1.0, 0.0, 0.0, 1.0]
+              "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [-1.0, -1.0, 1.0],
+              "id": "line_art-lines-2-3",
+              "co": [100, -100, 100],
               "pressure": 1.0,
               "strength": 1.0,
-              "vertexColor": [1.0, 0.0, 0.0, 1.0]
+              "vertexColor": [0.0, 0.0, 0.0, 0.0]
             }
           ]
         },
@@ -85,16 +95,18 @@
           "useCyclic": false,
           "points": [
             {
-              "co": [1.0, -1.0, 1.0],
+              "id": "line_art-lines-3-1",
+              "co": [100, 100, 100],
               "pressure": 1.0,
               "strength": 1.0,
-              "vertexColor": [0.0, 1.0, 0.0, 1.0]
+              "vertexColor": [0.0, 0.0, 0.0, 0.0]
             },
             {
-              "co": [1.0, -1.0, -1.0],
+              "id": "line_art-lines-3-2",
+              "co": [100, 100, -100],
               "pressure": 1.0,
               "strength": 1.0,
-              "vertexColor": [0.0, 1.0, 0.0, 1.0]
+              "vertexColor": [0.0, 0.0, 0.0, 0.0]
             }
           ]
         }

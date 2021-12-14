@@ -31,13 +31,14 @@ export class GPencilStroke {
 }
 
 export interface GPencilStrokePoint {
+  id: string;
   co: [number, number, number]; // position
   pressure: number; // Pressure of tablet at point when drawing it
   strength: number; // Color intensity (alpha factor)
   vertexColor: [number, number, number, number]; // Vertex color
 }
 
-export interface GPencilSettings {
+export interface GPencilToMovementsSettings {
   /**
    * If enabled, strokes are broken up into singular lines that may be individually optimised.
    */
@@ -53,7 +54,7 @@ export class GPencil {
     this.layers.push(layer);
   };
 
-  public toMovements = (settings: GPencilSettings = {}) => {
+  public toMovements = (settings: GPencilToMovementsSettings = {}) => {
     const movements: Movement[] = [];
 
     for (const layer of this.layers) {
@@ -78,6 +79,10 @@ export class GPencil {
             currentPoint,
             importMaterial(layer.material)
           );
+
+          // This ID isn't guaranteed to be stable, but it'll probably be close at least some of the time
+          line.id = point.id;
+
           orderedMovements.addMovement(line);
 
           lastPoint = currentPoint;
@@ -106,6 +111,7 @@ export interface GPencilJSON {
     strokes: {
       useCyclic: boolean;
       points: {
+        id: string;
         co: [number, number, number];
         pressure: number;
         strength: number;

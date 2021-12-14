@@ -9,6 +9,11 @@ import {
   Point,
   Transition,
 } from "./blender/movements/movements";
+import {
+  LightMove,
+  MovementMove,
+  MovementMoveReference,
+} from "./blender/movements/hardware";
 
 export interface OptimisationSettings {
   waitAtStartDuration: number;
@@ -64,7 +69,7 @@ export function sparseToDense(
   // End
   let lastMovement: Movement = new Point(
     settings.endingPoint,
-    settings.waitAtStartDuration,
+    1, // wait for 1ms at the end
     settings.transitionMaterial
   );
 
@@ -97,8 +102,20 @@ export function flattenDense(denseBag: DenseMovements): DenseMovements {
   return denseBag;
 }
 
+export function getTotalDuration(denseMoves: DenseMovements) {
+  // For now, use the total duration as the cost function
+  let cost = 0;
+
+  for (let index = 0; index < denseMoves.length; index++) {
+    const movement = denseMoves[index];
+    cost += movement.getDuration();
+  }
+
+  return cost;
+}
+
 /**
- * Take a sparse set of movements, join them, flatten them, calculate the total distance, deltaV required, and estimate jerk
+ * Take a sparse set of movements, join them, flatten them, calculate the total duration
  */
 export function sparseToCost(
   sparseBag: Movement[],
@@ -107,15 +124,7 @@ export function sparseToCost(
   const dense = sparseToDense(sparseBag, settings);
   const flattened = flattenDense(dense);
 
-  // For now, use the total duration as the cost function
-  let cost = 0;
-
-  for (let index = 0; index < flattened.length; index++) {
-    const movement = flattened[index];
-    cost += movement.getDuration();
-  }
-
-  return cost;
+  return getTotalDuration(flattened);
 }
 
 function swap(array: any[], a: number, b: number) {
@@ -190,6 +199,10 @@ function flipIsBetter(
   return true;
 }
 
+export interface OrderingCache {
+  [id: string]: number;
+}
+
 /**
  * Reorders and flips the members of a sparse bag of movements, optimising for the fastest tour.
  *
@@ -197,9 +210,19 @@ function flipIsBetter(
  */
 export function optimise(
   sparseBag: Movement[],
-  settings: OptimisationSettings
-): number {
+  settings: OptimisationSettings,
+  orderingCache: OrderingCache = {}
+) {
   const sparseLength = sparseBag.length;
+
+  // Sort the bag by the ordering cache
+  sparseBag.sort((a, b) => {
+    const aOrder = orderingCache[a.id] ?? 0;
+    const bOrder = orderingCache[b.id] ?? 0;
+
+    // Sort in ascending order
+    return aOrder - bOrder;
+  });
 
   let costRef = { cost: sparseToCost(sparseBag, settings) };
 
@@ -214,17 +237,18 @@ export function optimise(
 
   while (improved) {
     improved = false;
+    iteration++;
+
+    console.log(
+      `iteration: ${iteration},`,
+      `current cost: ${Math.round(costRef.cost * 100) / 100}ms, ${
+        Math.round((startingCost - costRef.cost) * 100) / 100
+      }ms saved, ${
+        Math.round((costRef.cost / startingCost) * 10000) / 100
+      }% of original`
+    );
 
     iteration: for (let i = 0; i < sparseLength - 1; i++) {
-      console.log(
-        `iteration: ${iteration++},`,
-        `depth: ${i},`,
-        `current cost: ${Math.round(costRef.cost * 100) / 100}, ${
-          Math.round(
-            ((startingCost - costRef.cost) / Math.abs(costRef.cost)) * 10000
-          ) / 100
-        }% decrease`
-      );
       for (let j = i + 1; j < sparseLength; j++) {
         // Try flipping each member first
         if (flipIsBetter(sparseBag, costRef, settings, i)) {
@@ -255,12 +279,41 @@ export function optimise(
     }
   }
 
-  return costRef.cost;
+  const nextOrderingCache: OrderingCache = {};
+
+  // Store the final order for passing to the next frame
+  for (let index = 0; index < sparseBag.length; index++) {
+    const movement = sparseBag[index];
+    nextOrderingCache[movement.id] = index;
+  }
+
+  return {
+    order: sparseBag,
+    cost: costRef.cost,
+    orderingCache: nextOrderingCache,
+    iterations: iteration,
+  };
 }
 
 export function toolpath(denseMovements: DenseMovements) {
+  const movementMoves: MovementMove[] = [];
+  const lightMoves: LightMove[] = [];
+
+  let id = 0;
   // each movement should have a generateToolpath mmethod
   for (const movement of denseMovements) {
-    // movement.generateToolpath();
+    // Increment the ID
+    id++;
+
+    // Build the hardware moves
+    movementMoves.push(...movement.generateToolpath(id));
+
+    // Build the light moves
+    lightMoves.push(...movement.generateLightpath(id));
   }
+
+  return {
+    movementMoves,
+    lightMoves,
+  };
 }

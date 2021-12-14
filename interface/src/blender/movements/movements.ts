@@ -14,7 +14,15 @@ const defaultSpeed = 30; // mm/s
  * The base level optimisable movement.
  */
 export abstract class Movement {
+  /**
+   * What type of movement
+   */
   abstract type: string;
+
+  /**
+   * The 'persistent' ID across frames to effectively cache optimisation
+   */
+  id: string = "";
 
   /**
    * Take this movement in the opposite direction
@@ -232,7 +240,7 @@ export class Line extends Movement {
 
   public getDuration = () => {
     // Lines are taken at maximum speed
-    return this.getLength() / this.maxSpeed;
+    return Math.ceil(this.getLength() / this.maxSpeed);
   };
 
   public getStart = () => {
@@ -320,7 +328,7 @@ export class Point extends Movement {
    */
   public getDuration = () => {
     if (this.duration > 0) {
-      return this.duration;
+      return Math.ceil(this.duration);
     }
 
     // The minimum duration is 1ms
@@ -465,7 +473,7 @@ export class Transition extends Movement {
   };
 
   public getDuration = () => {
-    return this.getLength() / this.maxSpeed;
+    return Math.ceil(this.getLength() / this.maxSpeed);
   };
 
   public getStart = () => {

@@ -10,6 +10,7 @@ export interface ParticlesStrokePoint {
 }
 
 export interface Particle {
+  id: string;
   location: [number, number, number];
   rotation: [number, number, number];
   velocity: [number, number, number];
@@ -58,6 +59,9 @@ export class Particles {
 
         const point = new Point(location, settings.stopDelay ?? 0, material);
 
+        // This ID is guaranteed to be stable
+        point.id = particle.id;
+
         if (settings.drawInVelocityOrientation) {
           point.velocity.set(
             particle.velocity[0],
@@ -81,6 +85,7 @@ export interface ParticlesJSON {
     name: string;
     material: MaterialJSON;
     particles: {
+      id: string;
       location: [number, number, number];
       rotation: [number, number, number];
       velocity: [number, number, number];
