@@ -7,7 +7,7 @@ const defaultSettings: OptimisationSettings = {
   startingPoint: new Vector3(0, 0, 0),
   endingPoint: new Vector3(0, 0, 0),
   maxSpeed: 300,
-  waitAtStartDuration: 0,
+  waitAtStartDuration: 1000,
   transitionMaterial: blankMaterial,
 };
 

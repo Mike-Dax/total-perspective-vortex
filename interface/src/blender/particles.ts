@@ -1,6 +1,11 @@
 import { Color, Vector3 } from "three";
 import { importMaterial, MaterialJSON } from "./material";
 import { Point, Line, Movement, MovementGroup } from "./movements/movements";
+import {
+  getMaterialOverride,
+  getToMovementSettings,
+  ToMovementSettings,
+} from "./toMovements";
 
 export interface ParticlesStrokePoint {
   co: [number, number, number]; // position
@@ -43,7 +48,7 @@ export class Particles {
     this.systems.push(layer);
   };
 
-  public toMovements = (settings: ParticlesToMovementsSettings = {}) => {
+  public toMovements = (settings: ToMovementSettings) => {
     const movements: Movement[] = [];
 
     for (const system of this.systems) {
@@ -57,12 +62,26 @@ export class Particles {
           particle.location[2]
         );
 
-        const point = new Point(location, settings.stopDelay ?? 0, material);
+        const settingsWithOverride = getToMovementSettings(
+          settings,
+          "particles",
+          [this.name, `${this.name}-${system.name}`]
+        );
+
+        const point = new Point(
+          location,
+          settingsWithOverride.stopDelay ?? 0,
+
+          getMaterialOverride(settings.materialOverrides, material, [
+            this.name,
+            `${this.name}-${system.name}`,
+          ])
+        );
 
         // This ID is guaranteed to be stable
         point.id = particle.id;
 
-        if (settings.drawInVelocityOrientation) {
+        if (settingsWithOverride.drawInVelocityOrientation) {
           point.velocity.set(
             particle.velocity[0],
             particle.velocity[1],

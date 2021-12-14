@@ -206,7 +206,7 @@ export interface OrderingCache {
 /**
  * Reorders and flips the members of a sparse bag of movements, optimising for the fastest tour.
  *
- * Modifies the array in place, returns the expected cost?
+ * Modifies the array in place.
  */
 export function optimise(
   sparseBag: Movement[],

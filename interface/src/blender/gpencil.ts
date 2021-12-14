@@ -1,6 +1,11 @@
 import { Vector3 } from "three";
 import { importMaterial, MaterialJSON } from "./material";
 import { Point, Movement, Line, MovementGroup } from "./movements/movements";
+import {
+  getMaterialOverride,
+  getToMovementSettings,
+  ToMovementSettings,
+} from "./toMovements";
 
 export class GPencilLayer {
   public strokes: GPencilStroke[] = [];
@@ -54,10 +59,12 @@ export class GPencil {
     this.layers.push(layer);
   };
 
-  public toMovements = (settings: GPencilToMovementsSettings = {}) => {
+  public toMovements = (settings: ToMovementSettings) => {
     const movements: Movement[] = [];
 
     for (const layer of this.layers) {
+      const material = importMaterial(layer.material);
+
       for (const stroke of layer.strokes) {
         let lastPoint = new Vector3(
           stroke.points[0].co[0],
@@ -65,7 +72,19 @@ export class GPencil {
           stroke.points[0].co[2]
         );
 
+        const settingsWithOverride = getToMovementSettings(
+          settings,
+          "gpencil",
+          [this.name, `${this.name}-${layer.info}`]
+        );
+
         const orderedMovements = new MovementGroup();
+
+        const materialWithOverride = getMaterialOverride(
+          settings.materialOverrides,
+          material,
+          [this.name, `${this.name}-${layer.info}`]
+        );
 
         for (let index = 0; index < stroke.points.length; index++) {
           const point = stroke.points[index];
@@ -77,7 +96,7 @@ export class GPencil {
           const line: Movement = new Line(
             lastPoint,
             currentPoint,
-            importMaterial(layer.material)
+            materialWithOverride
           );
 
           // This ID isn't guaranteed to be stable, but it'll probably be close at least some of the time
@@ -90,7 +109,7 @@ export class GPencil {
           // TODO: Read vertex colours and mix into the layer material
         }
 
-        if (settings.breakUpStrokes) {
+        if (settingsWithOverride.breakUpStrokes) {
           movements.push(...orderedMovements.movements);
         } else {
           movements.push(orderedMovements);

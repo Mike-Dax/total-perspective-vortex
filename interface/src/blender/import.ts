@@ -1,5 +1,14 @@
-import { GPencilJSON, importGPencil } from "./gpencil";
-import { importParticles, ParticlesJSON } from "./particles";
+import {
+  GPencilJSON,
+  GPencilToMovementsSettings,
+  importGPencil,
+} from "./gpencil";
+import { Material, MaterialJSON } from "./material";
+import {
+  importParticles,
+  ParticlesJSON,
+  ParticlesToMovementsSettings,
+} from "./particles";
 
 export type MovementJSON = GPencilJSON | ParticlesJSON;
 
