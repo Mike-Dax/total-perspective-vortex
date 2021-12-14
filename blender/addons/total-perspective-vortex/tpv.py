@@ -54,6 +54,14 @@ def serialise_vector(vec: list[float]):
     return [serialise_float(p) for p in vec]
 
 
+def serialise_position(vec: list[float], context, obj):
+    world_coordinate = obj.matrix_world @ vec  # Multiply by the world matrix
+
+    scale_length = context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
+
+    return [serialise_float(p / scale_length) for p in world_coordinate]
+
+
 # Up to 6 decimals of precision
 def serialise_float(f: float):
     return round(f, 6)
@@ -109,7 +117,7 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
                     point: bpy.types.GPencilStrokePoint
 
                     point_struct = dict({
-                        "co": serialise_vector(point.co),
+                        "co": serialise_position(point.co, context, gp_obj),
                         "pressure": serialise_float(point.pressure),
                         "strength": serialise_float(point.strength),
                         "vertexColor": serialise_vector(point.vertex_color),
@@ -193,7 +201,7 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
                 continue
 
             particle_struct = dict({
-                "location": serialise_vector(particle.location),
+                "location": serialise_position(particle.location, context, pt_obj),
                 "rotation": serialise_vector(particle.rotation),
                 "velocity": serialise_vector(particle.velocity)
             })

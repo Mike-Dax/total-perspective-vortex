@@ -17,3 +17,14 @@ To increase the max size of files that get code insight, go Help -> Edit Custom 
 ---
 
 Blender must be run from the command line in order to get console output.
+
+
+
+---
+
+For better scale, in edit mode, set the grid scale to 0.1, the unit scale to 0.1, the length to millimeters.
+
+This makes a 10x sized cube 200mm across in each direction, roughly the render volume
+
+![image-20211214151515847](./docs/blender-scale-settings.png)
+
