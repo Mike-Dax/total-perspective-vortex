@@ -9,7 +9,7 @@ import {
 } from "./movements";
 import { LightMove, MovementMove, MovementMoveReference } from "./hardware";
 
-import { Settings } from "./settings";
+import { getTransitionMaterial, Settings } from "./settings";
 
 /**
  * Add transition movements between each move if the start and the end are at different places
@@ -20,11 +20,13 @@ export function sparseToDense(
 ): DenseMovements {
   const denseMovements: DenseMovements = declareDense([]);
 
+  const transitionMaterial = getTransitionMaterial(settings);
+
   // Start
   let previousMovement: Movement = new Point(
     settings.optimisation.startingPoint,
     settings.optimisation.waitAtStartDuration,
-    settings.transitionMaterial
+    transitionMaterial
   );
 
   // Middle
@@ -36,7 +38,7 @@ export function sparseToDense(
     const transition = new Transition(
       previousMovement,
       movement,
-      settings.transitionMaterial
+      transitionMaterial
     );
 
     // Add the transition to the dense bag
@@ -54,14 +56,14 @@ export function sparseToDense(
   let lastMovement: Movement = new Point(
     settings.optimisation.endingPoint,
     1, // wait for 1ms at the end
-    settings.transitionMaterial
+    transitionMaterial
   );
 
   // Transition to the end
   const transitionToEnd = new Transition(
     previousMovement,
     lastMovement,
-    settings.transitionMaterial
+    transitionMaterial
   );
 
   // Add the transition to the dense bag
@@ -187,17 +189,83 @@ export interface OrderingCache {
   [id: string]: number;
 }
 
+export interface Progress {
+  duration: number;
+  text: string;
+  // method: string;
+  toolpath: Toolpath;
+  orderingCache: OrderingCache;
+}
+
+export type Continue = boolean;
+
 /**
  * Reorders and flips the members of a sparse bag of movements, optimising for the fastest tour.
- *
- * Modifies the array in place.
  */
 export function optimise(
   sparseBag: Movement[],
   settings: Settings,
+  updateProgress: (progress: Progress) => Continue,
   orderingCache: OrderingCache = {}
 ) {
   const sparseLength = sparseBag.length;
+
+  // Compare all costs to random order
+  let costRef = { cost: sparseToCost(sparseBag, settings) };
+
+  const startingCost = costRef.cost;
+
+  // NN search
+
+  const nnStart = Date.now();
+
+  // Run a nearest neighbour search and see how optimal it is
+  const toOrder: Movement[] = sparseBag.slice(1);
+  let lastMovement = sparseBag[0];
+  const nnOrdered: Movement[] = [lastMovement];
+
+  while (toOrder.length > 0) {
+    let closest: Movement = lastMovement;
+    let closestDistance = Infinity;
+    let closestIndex = 0;
+
+    for (let index = 0; index < toOrder.length; index++) {
+      const movement = toOrder[index];
+
+      const d = movement.getEnd().distanceToSquared(lastMovement.getStart());
+
+      if (d < closestDistance) {
+        closestDistance = d;
+        closest = movement;
+        closestIndex = index;
+      }
+    }
+
+    // We've found the next closest, pop it off
+    toOrder.splice(closestIndex, 1);
+
+    // And add it to the nnOrdered array
+    nnOrdered.push(closest);
+
+    // Update the lastMovement
+    lastMovement = closest;
+  }
+
+  const nnEnd = Date.now();
+
+  const nnCost = sparseToCost(nnOrdered, settings);
+
+  const nnEndCost = Date.now();
+
+  console.log(
+    `baseline cost: ${costRef.cost}, nearest neighbour: ${nnCost}, took ${
+      nnEnd - nnStart
+    } (plus ${nnEndCost - nnEnd} to calculate the final duration)`
+  );
+
+  costRef.cost = nnCost;
+
+  // NN end
 
   // Sort the bag by the ordering cache
   sparseBag.sort((a, b) => {
@@ -208,16 +276,28 @@ export function optimise(
     return aOrder - bOrder;
   });
 
-  let costRef = { cost: sparseToCost(sparseBag, settings) };
-
   // randomise starting order
   // sparseBag.sort((movement) => Math.random() - 0.5);
-
-  const startingCost = costRef.cost;
 
   let improved = true;
 
   let iteration = 0;
+
+  const tspStart = Date.now();
+
+  const ordered = nnOrdered.slice();
+
+  const nextOrderingCache: OrderingCache = {};
+
+  const populateOrderingCache = () => {
+    // Store the final order for passing to the next frame
+    for (let index = 0; index < ordered.length; index++) {
+      const movement = ordered[index];
+      nextOrderingCache[movement.id] = index;
+    }
+
+    return nextOrderingCache;
+  };
 
   while (improved) {
     improved = false;
@@ -229,33 +309,49 @@ export function optimise(
         Math.round((startingCost - costRef.cost) * 100) / 100
       }ms saved, ${
         Math.round((costRef.cost / startingCost) * 10000) / 100
-      }% of original`
+      }% of original, ${
+        Math.round((costRef.cost / nnCost) * 10000) / 100
+      }% of NN search, `
     );
+
+    const shouldContinue = updateProgress({
+      duration: iteration,
+      text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms, ${
+        Math.round((costRef.cost / startingCost) * 10000) / 100
+      }% of original`,
+      // method: iteration === 1 ? "nearest-neighbour" : "2-opt",
+      toolpath: toolpath(flattenDense(sparseToDense(ordered, settings))),
+      orderingCache: populateOrderingCache(),
+    });
+
+    const endProgress = Date.now();
+
+    if (!shouldContinue) break;
 
     iteration: for (let i = 0; i < sparseLength - 1; i++) {
       for (let j = i + 1; j < sparseLength; j++) {
         // Try flipping each member first
-        if (flipIsBetter(sparseBag, costRef, settings, i)) {
+        if (flipIsBetter(ordered, costRef, settings, i)) {
           improved = true;
           continue iteration;
         }
-        if (flipIsBetter(sparseBag, costRef, settings, j)) {
+        if (flipIsBetter(ordered, costRef, settings, j)) {
           improved = true;
           continue iteration;
         }
 
         // Try swapping the two movements
-        if (swapIsBetter(sparseBag, costRef, settings, i, j)) {
+        if (swapIsBetter(ordered, costRef, settings, i, j)) {
           improved = true;
           continue iteration;
         }
 
         // Try flipping each member again
-        if (flipIsBetter(sparseBag, costRef, settings, i)) {
+        if (flipIsBetter(ordered, costRef, settings, i)) {
           improved = true;
           continue iteration;
         }
-        if (flipIsBetter(sparseBag, costRef, settings, j)) {
+        if (flipIsBetter(ordered, costRef, settings, j)) {
           improved = true;
           continue iteration;
         }
@@ -263,28 +359,33 @@ export function optimise(
     }
   }
 
-  const nextOrderingCache: OrderingCache = {};
+  const tspEnd = Date.now();
 
-  // Store the final order for passing to the next frame
-  for (let index = 0; index < sparseBag.length; index++) {
-    const movement = sparseBag[index];
-    nextOrderingCache[movement.id] = index;
-  }
+  console.log(
+    `baseline cost: ${startingCost}, nearest neighbour: ${nnCost}, TSP solver: ${
+      costRef.cost
+    }, tsp took ${tspEnd - tspStart}`
+  );
 
   return {
-    order: sparseBag,
+    orderedMovements: ordered,
     cost: costRef.cost,
-    orderingCache: nextOrderingCache,
     iterations: iteration,
+    orderingCache: populateOrderingCache(),
   };
 }
 
-export function toolpath(denseMovements: DenseMovements) {
+export interface Toolpath {
+  movementMoves: MovementMove[];
+  lightMoves: LightMove[];
+}
+
+export function toolpath(denseMovements: DenseMovements): Toolpath {
   const movementMoves: MovementMove[] = [];
   const lightMoves: LightMove[] = [];
 
   let id = 0;
-  // each movement should have a generateToolpath mmethod
+  // each movement should have a generateToolpath method
   for (const movement of denseMovements) {
     // Increment the ID
     id++;
