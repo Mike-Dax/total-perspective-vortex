@@ -76,6 +76,7 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
     save_struct = dict({
         "type": "gpencil",
+        "frame": frame_number,
         "name": gp_obj.name,
         "layers": [],
     })
@@ -186,6 +187,7 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
     save_struct = dict({
         "type": "particles",
+        "frame": frame_number,
         "name": pt_obj.name,
         "systems": [],
     })
