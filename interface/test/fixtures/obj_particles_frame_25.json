@@ -1,5 +1,6 @@
 {
   "type": "particles",
+  "frame": 25,
   "name": "Cube",
   "systems": [
     {
