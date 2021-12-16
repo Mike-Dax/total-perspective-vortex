@@ -1,7 +1,8 @@
 import { GPencilToMovementsSettings } from "./gpencil";
-import { Material } from "./material";
+import { importMaterial, Material, MaterialJSON } from "./material";
 import { ParticlesToMovementsSettings } from "./particles";
 import { Vector3 } from "three";
+import { LRUCache } from "typescript-lru-cache";
 
 export interface Settings {
   // Global object type settings
@@ -17,8 +18,13 @@ export interface Settings {
       | Partial<ParticlesToMovementsSettings>;
   };
 
+  // For disabling the rendering of objects
+  objectToggles: {
+    [objectName: string]: boolean;
+  };
+
   // Materials
-  transitionMaterial: Material;
+  transitionMaterial: MaterialJSON;
   materialOverrides: MaterialOverrides;
 
   // Optimisation settings
@@ -26,11 +32,11 @@ export interface Settings {
 }
 
 export interface MaterialOverrides {
-  globalOveride: Material | null;
+  globalOveride: MaterialJSON | null;
 
   // Do object level material overrides here.
   objectMaterialOverrides: {
-    [objectName: string]: Material;
+    [objectName: string]: MaterialJSON;
   };
 }
 
@@ -78,23 +84,62 @@ export function getToMovementSettings<
   return objSettings as ReturnType;
 }
 
+const materialCache = new LRUCache<string, Material>({
+  maxSize: 10_000, // store up to 10k materials before dumping them
+});
+
+// Cache the transition material
+export function getTransitionMaterial(settings: Settings) {
+  const key = JSON.stringify(settings.transitionMaterial);
+
+  if (materialCache.has(key)) {
+    return materialCache.get(key)!;
+  }
+
+  const material = importMaterial(settings.transitionMaterial);
+  materialCache.set(key, material);
+
+  return material;
+}
+
 export function getMaterialOverride(
-  overrides: MaterialOverrides,
-  providedMaterial: Material,
+  settings: Settings,
+  providedMaterial: MaterialJSON,
   overrideKeys: string[]
 ) {
   let mat = providedMaterial;
 
-  if (overrides.globalOveride) {
-    mat = overrides.globalOveride;
+  if (settings.materialOverrides.globalOveride) {
+    mat = settings.materialOverrides.globalOveride;
   }
 
   // Iterate over every override key, merging in the layers
   for (const objName of overrideKeys) {
-    if (overrides.objectMaterialOverrides[objName]) {
-      mat = overrides.objectMaterialOverrides[objName];
+    if (settings.materialOverrides.objectMaterialOverrides[objName]) {
+      mat = settings.materialOverrides.objectMaterialOverrides[objName];
     }
   }
 
-  return mat;
+  // See if we've imported it before
+  const key = JSON.stringify(mat);
+
+  if (materialCache.has(key)) {
+    return materialCache.get(key)!;
+  }
+
+  const material = importMaterial(mat);
+  materialCache.set(key, material);
+
+  return material;
+}
+
+export function getShouldSkip(settings: Settings, keys: string[]) {
+  // Iterate over every key, if any are marked as toggle off, skip
+  for (const objName of keys) {
+    if (settings.objectToggles[objName] === false) {
+      return true;
+    }
+  }
+
+  return false;
 }

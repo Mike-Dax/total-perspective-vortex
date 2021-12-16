@@ -3,6 +3,7 @@ import { importMaterial, MaterialJSON } from "./material";
 import { Point, Line, Movement, MovementGroup } from "./movements";
 import {
   getMaterialOverride,
+  getShouldSkip,
   getToMovementSettings,
   Settings,
 } from "./settings";
@@ -48,19 +49,22 @@ export class Particles {
     this.systems.push(layer);
   };
 
+  public getObjectNameTree = () => {
+    return {
+      [this.name]: this.systems.map((system) => `${this.name}-${system.name}`),
+    };
+  };
+
   public toMovements = (settings: Settings) => {
     const movements: Movement[] = [];
 
     for (const system of this.systems) {
-      const material = importMaterial(system.material);
-
       for (const particle of system.particles) {
-        // Convert the location to a Vector3
-        const location = new Vector3(
-          particle.location[0],
-          particle.location[1],
-          particle.location[2]
-        );
+        const overrideKeys = [this.name, `${this.name}-${system.name}`];
+
+        if (getShouldSkip(settings, overrideKeys)) {
+          continue;
+        }
 
         const settingsWithOverride = getToMovementSettings(
           settings,
@@ -68,14 +72,18 @@ export class Particles {
           [this.name, `${this.name}-${system.name}`]
         );
 
+        // Convert the location to a Vector3
+        const location = new Vector3(
+          particle.location[0],
+          particle.location[1],
+          particle.location[2]
+        );
+
         const point = new Point(
           location,
           settingsWithOverride.stopDelay ?? 0,
 
-          getMaterialOverride(settings.materialOverrides, material, [
-            this.name,
-            `${this.name}-${system.name}`,
-          ])
+          getMaterialOverride(settings, system.material, overrideKeys)
         );
 
         // This ID is guaranteed to be stable
@@ -99,6 +107,7 @@ export class Particles {
 
 export interface ParticlesJSON {
   type: "particles";
+  frame: number;
   name: string;
   systems: {
     name: string;

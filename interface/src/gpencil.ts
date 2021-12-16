@@ -3,6 +3,7 @@ import { importMaterial, MaterialJSON } from "./material";
 import { Point, Movement, Line, MovementGroup } from "./movements";
 import {
   getMaterialOverride,
+  getShouldSkip,
   getToMovementSettings,
   Settings,
 } from "./settings";
@@ -59,18 +60,22 @@ export class GPencil {
     this.layers.push(layer);
   };
 
+  public getObjectNameTree = () => {
+    return {
+      [this.name]: this.layers.map((layer) => `${this.name}-${layer.info}`),
+    };
+  };
+
   public toMovements = (settings: Settings) => {
     const movements: Movement[] = [];
 
     for (const layer of this.layers) {
-      const material = importMaterial(layer.material);
-
       for (const stroke of layer.strokes) {
-        let lastPoint = new Vector3(
-          stroke.points[0].co[0],
-          stroke.points[0].co[1],
-          stroke.points[0].co[2]
-        );
+        const overrideKeys = [this.name, `${this.name}-${layer.info}`];
+
+        if (getShouldSkip(settings, overrideKeys)) {
+          continue;
+        }
 
         const settingsWithOverride = getToMovementSettings(
           settings,
@@ -78,12 +83,18 @@ export class GPencil {
           [this.name, `${this.name}-${layer.info}`]
         );
 
+        let lastPoint = new Vector3(
+          stroke.points[0].co[0],
+          stroke.points[0].co[1],
+          stroke.points[0].co[2]
+        );
+
         const orderedMovements = new MovementGroup();
 
         const materialWithOverride = getMaterialOverride(
-          settings.materialOverrides,
-          material,
-          [this.name, `${this.name}-${layer.info}`]
+          settings,
+          layer.material,
+          overrideKeys
         );
 
         for (let index = 0; index < stroke.points.length; index++) {
@@ -123,6 +134,7 @@ export class GPencil {
 
 export interface GPencilJSON {
   type: "gpencil";
+  frame: number;
   name: string;
   layers: {
     info: string;
