@@ -2,6 +2,7 @@ import fs from "fs";
 import path from "path";
 import { importJson, Renderable } from "./import";
 import { MovementJSON } from "./import";
+import { Toolpath } from "./passes";
 
 async function* walkJSON(dir: string): AsyncGenerator<string> {
   for await (const d of await fs.promises.opendir(dir)) {
@@ -79,4 +80,8 @@ export function calculateObjectTree(renderables: Renderable[]) {
   }
 
   return tree;
+}
+
+export function writeToolpathToFile(filepath: string, toolpath: Toolpath) {
+  return fs.promises.writeFile(filepath, JSON.stringify(toolpath));
 }

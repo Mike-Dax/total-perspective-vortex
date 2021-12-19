@@ -77,7 +77,7 @@ export class SimpleColorMaterial extends Material {
   }
 
   public generateLightpath = (id: number, movement: Movement) => {
-    const move: LightMove = {
+    const fade: LightMove = {
       id,
       duration: movement.getDuration(),
       type: LightMoveType.IMMEDIATE,
@@ -85,11 +85,14 @@ export class SimpleColorMaterial extends Material {
       num_points: 1,
     };
 
-    return [move];
+    return [fade];
   };
 }
 
-export const blankMaterial = new SimpleColorMaterial([0, 0, 0, 0]);
+export const blankMaterial: ColorMaterialJSON = {
+  type: "color",
+  color: [0, 0, 0, 0],
+};
 
 export function importColorMaterial(json: ColorMaterialJSON) {
   const mat = new SimpleColorMaterial(json.color);

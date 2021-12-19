@@ -17,6 +17,8 @@ export const defaultSettings: Settings = {
   // Do object level overrides here. Particle subsystems can be `object -> subsystem name`
   objectOverrides: {},
 
+  objectToggles: {},
+
   transitionMaterial: blankMaterial,
   materialOverrides: {
     globalOveride: null,
@@ -25,8 +27,8 @@ export const defaultSettings: Settings = {
 
   optimisation: {
     startingPoint: new Vector3(0, 0, 0),
-    endingPoint: new Vector3(10000, 0, 0),
-    maxSpeed: 300,
+    endingPoint: new Vector3(0, 0, 0),
+    maxSpeed: 20,
     waitAtStartDuration: 1000,
   },
 };

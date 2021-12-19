@@ -18,7 +18,7 @@ describe("Optimise function", () => {
 
     const movements = particles.toMovements(defaultSettings);
 
-    const { cost } = optimise(movements, defaultSettings);
+    const { cost } = optimise(movements, defaultSettings, () => true);
 
     expect(cost).toBeTruthy();
   });
@@ -27,7 +27,7 @@ describe("Optimise function", () => {
 
     const movements = cube.toMovements(defaultSettings);
 
-    const { cost } = optimise(movements, defaultSettings);
+    const { cost } = optimise(movements, defaultSettings, () => true);
 
     expect(cost).toBeTruthy();
   });
@@ -38,7 +38,11 @@ describe("Optimise function", () => {
     const frame_3_movements = frame_3.toMovements(defaultSettings);
 
     const start3 = Date.now();
-    const results_frame_3 = optimise(frame_3_movements, defaultSettings);
+    const results_frame_3 = optimise(
+      frame_3_movements,
+      defaultSettings,
+      () => true
+    );
     const end3 = Date.now();
 
     const frame_3_take_2 = importParticles(
@@ -52,6 +56,7 @@ describe("Optimise function", () => {
     const results_frame_3_take_2 = optimise(
       frame_3_take_2_movements,
       defaultSettings,
+      () => true,
       results_frame_3.orderingCache
     );
     const end3_take_2 = Date.now();
@@ -65,6 +70,7 @@ describe("Optimise function", () => {
     const results_frame_4 = optimise(
       frame_4_movements,
       defaultSettings,
+      () => true,
       results_frame_3.orderingCache
     );
     const end4 = Date.now();
@@ -78,6 +84,7 @@ describe("Optimise function", () => {
     const results_frame_25 = optimise(
       frame_25_movements,
       defaultSettings,
+      () => true,
       results_frame_3.orderingCache
     );
     const end25 = Date.now();

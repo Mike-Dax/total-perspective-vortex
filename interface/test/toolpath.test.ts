@@ -21,11 +21,15 @@ describe("Toolpath generation", () => {
 
     const movements = cube.toMovements(defaultSettings);
 
-    optimise(movements, defaultSettings);
+    const { orderedMovements } = optimise(
+      movements,
+      defaultSettings,
+      () => true
+    );
 
     // optimised, generate tool path
 
-    const dense = sparseToDense(movements, defaultSettings);
+    const dense = sparseToDense(orderedMovements, defaultSettings);
     const flattened = flattenDense(dense);
     const duration = getTotalDuration(flattened);
 

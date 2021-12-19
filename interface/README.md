@@ -11,6 +11,8 @@ https://www.jasondavies.com/animated-bezier/
 ## Flamecharts
 
 ```
-
 yarn node -r ts-node/register --inspect-brk ./optimise_test.ts
+
+
+yarn node -r ts-node/register ./optimise_test.ts
 ```

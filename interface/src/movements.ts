@@ -386,9 +386,7 @@ const transitionCurveCache = new LRUCache<string, number>({
 });
 
 function transitionKeygen(a: Vector3, b: Vector3, c: Vector3, d: Vector3) {
-  return `[${a.toArray().join(",")}][${b.toArray().join(",")}][${c
-    .toArray()
-    .join(",")}][${d.toArray().join(",")}]`;
+  return `${a.x},${a.y},${a.z}-${b.x},${b.y},${b.z}-${c.x},${c.y},${c.z}-${d.x},${d.y},${d.z}`;
 }
 
 let cacheHits = 0;

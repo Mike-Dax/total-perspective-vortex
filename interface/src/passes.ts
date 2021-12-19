@@ -195,163 +195,149 @@ export interface Progress {
   // method: string;
   toolpath: Toolpath;
   orderingCache: OrderingCache;
+  // Whether this is the final update of this run
+  completed: boolean;
+  // Whether a minima was found
+  minimaFound: boolean;
 }
 
 export type Continue = boolean;
 
 /**
  * Reorders and flips the members of a sparse bag of movements, optimising for the fastest tour.
+ *
+ * Async so we can interrupt the event queue to check for pausing, otherwise it'll just run.
  */
-export function optimise(
+export async function optimise(
   sparseBag: Movement[],
   settings: Settings,
-  updateProgress: (progress: Progress) => Continue,
-  orderingCache: OrderingCache = {}
+  updateProgress: (progress: Progress) => Promise<Continue>,
+  orderingCache: OrderingCache | null = null
 ) {
   const sparseLength = sparseBag.length;
 
-  // Compare all costs to random order
-  let costRef = { cost: sparseToCost(sparseBag, settings) };
+  let ordering: Movement[] = [];
 
-  const startingCost = costRef.cost;
+  // If an orderingCache is provided, start with that, otherwise do a nearest neighbour run first.
+  if (orderingCache) {
+    // Copy the array, might not be necessary since this is on the other end of an IPC bridge and it's just been deserialised.
+    // TODO: Bench removing this
+    ordering = sparseBag.slice();
 
-  // NN search
+    // Sort the movements according to the movement cache
+    ordering.sort((a, b) => {
+      const aOrder = orderingCache[a.id] ?? 0;
+      const bOrder = orderingCache[b.id] ?? 0;
 
-  const nnStart = Date.now();
+      // Sort in ascending order
+      return aOrder - bOrder;
+    });
+  } else {
+    // First run, do a nearest neighbour search, the first movement is the starting point, so start there.
 
-  // Run a nearest neighbour search and see how optimal it is
-  const toOrder: Movement[] = sparseBag.slice(1);
-  let lastMovement = sparseBag[0];
-  const nnOrdered: Movement[] = [lastMovement];
+    // Run a nearest neighbour search and see how optimal it is
+    const toOrder: Movement[] = sparseBag.slice(); // Copy the array
 
-  while (toOrder.length > 0) {
-    let closest: Movement = lastMovement;
-    let closestDistance = Infinity;
-    let closestIndex = 0;
+    // Pick a random movement to start at, remove it from the array
+    let previousMovement = toOrder.splice(
+      Math.floor(Math.random() * toOrder.length),
+      1 // grab one
+    )[0]; // splice returns an array of the deleted items, index 0 is our starting point
+    ordering = [previousMovement];
 
-    for (let index = 0; index < toOrder.length; index++) {
-      const movement = toOrder[index];
+    // Pick the closest
+    while (toOrder.length > 0) {
+      let closest: Movement = previousMovement;
+      let closestDistance = Infinity;
+      let closestIndex = 0;
 
-      const d = movement.getEnd().distanceToSquared(lastMovement.getStart());
+      for (let index = 0; index < toOrder.length; index++) {
+        const movement = toOrder[index];
 
-      if (d < closestDistance) {
-        closestDistance = d;
-        closest = movement;
-        closestIndex = index;
+        const d = movement
+          .getEnd()
+          .distanceToSquared(previousMovement.getStart());
+
+        if (d < closestDistance) {
+          closestDistance = d;
+          closest = movement;
+          closestIndex = index;
+        }
       }
+
+      // We've found the next closest, pop it off
+      toOrder.splice(closestIndex, 1);
+
+      // And add it to the nnOrdered array
+      ordering.push(closest);
+
+      // Update the previousMovement
+      previousMovement = closest;
     }
-
-    // We've found the next closest, pop it off
-    toOrder.splice(closestIndex, 1);
-
-    // And add it to the nnOrdered array
-    nnOrdered.push(closest);
-
-    // Update the lastMovement
-    lastMovement = closest;
   }
 
-  const nnEnd = Date.now();
-
-  const nnCost = sparseToCost(nnOrdered, settings);
-
-  const nnEndCost = Date.now();
-
-  console.log(
-    `baseline cost: ${costRef.cost}, nearest neighbour: ${nnCost}, took ${
-      nnEnd - nnStart
-    } (plus ${nnEndCost - nnEnd} to calculate the final duration)`
-  );
-
-  costRef.cost = nnCost;
-
-  // NN end
-
-  // Sort the bag by the ordering cache
-  sparseBag.sort((a, b) => {
-    const aOrder = orderingCache[a.id] ?? 0;
-    const bOrder = orderingCache[b.id] ?? 0;
-
-    // Sort in ascending order
-    return aOrder - bOrder;
-  });
-
-  // randomise starting order
-  // sparseBag.sort((movement) => Math.random() - 0.5);
-
-  let improved = true;
-
-  let iteration = 0;
-
-  const tspStart = Date.now();
-
-  const ordered = nnOrdered.slice();
-
+  // Setup our ordering cache
   const nextOrderingCache: OrderingCache = {};
 
   const populateOrderingCache = () => {
     // Store the final order for passing to the next frame
-    for (let index = 0; index < ordered.length; index++) {
-      const movement = ordered[index];
+    for (let index = 0; index < ordering.length; index++) {
+      const movement = ordering[index];
       nextOrderingCache[movement.id] = index;
     }
 
     return nextOrderingCache;
   };
 
+  // Establish base cost to compare against
+  let costRef = { cost: sparseToCost(sparseBag, settings) };
+
+  let improved = true; // Start iterating
+  let iteration = 0;
+  let stoppedEarly = false;
+
   while (improved) {
     improved = false;
     iteration++;
 
-    console.log(
-      `iteration: ${iteration},`,
-      `current cost: ${Math.round(costRef.cost * 100) / 100}ms, ${
-        Math.round((startingCost - costRef.cost) * 100) / 100
-      }ms saved, ${
-        Math.round((costRef.cost / startingCost) * 10000) / 100
-      }% of original, ${
-        Math.round((costRef.cost / nnCost) * 10000) / 100
-      }% of NN search, `
-    );
-
-    const shouldContinue = updateProgress({
+    const shouldContinue = await updateProgress({
       duration: iteration,
-      text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms, ${
-        Math.round((costRef.cost / startingCost) * 10000) / 100
-      }% of original`,
-      // method: iteration === 1 ? "nearest-neighbour" : "2-opt",
-      toolpath: toolpath(flattenDense(sparseToDense(ordered, settings))),
+      text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms`,
+      toolpath: toolpath(flattenDense(sparseToDense(ordering, settings))),
       orderingCache: populateOrderingCache(),
+      completed: false,
+      minimaFound: false,
     });
 
-    const endProgress = Date.now();
-
-    if (!shouldContinue) break;
+    if (!shouldContinue) {
+      stoppedEarly = true;
+      break;
+    }
 
     iteration: for (let i = 0; i < sparseLength - 1; i++) {
       for (let j = i + 1; j < sparseLength; j++) {
         // Try flipping each member first
-        if (flipIsBetter(ordered, costRef, settings, i)) {
+        if (flipIsBetter(ordering, costRef, settings, i)) {
           improved = true;
           continue iteration;
         }
-        if (flipIsBetter(ordered, costRef, settings, j)) {
+        if (flipIsBetter(ordering, costRef, settings, j)) {
           improved = true;
           continue iteration;
         }
 
         // Try swapping the two movements
-        if (swapIsBetter(ordered, costRef, settings, i, j)) {
+        if (swapIsBetter(ordering, costRef, settings, i, j)) {
           improved = true;
           continue iteration;
         }
 
         // Try flipping each member again
-        if (flipIsBetter(ordered, costRef, settings, i)) {
+        if (flipIsBetter(ordering, costRef, settings, i)) {
           improved = true;
           continue iteration;
         }
-        if (flipIsBetter(ordered, costRef, settings, j)) {
+        if (flipIsBetter(ordering, costRef, settings, j)) {
           improved = true;
           continue iteration;
         }
@@ -359,19 +345,22 @@ export function optimise(
     }
   }
 
-  const tspEnd = Date.now();
-
-  console.log(
-    `baseline cost: ${startingCost}, nearest neighbour: ${nnCost}, TSP solver: ${
-      costRef.cost
-    }, tsp took ${tspEnd - tspStart}`
-  );
+  // Final status update
+  await updateProgress({
+    duration: iteration,
+    text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms`,
+    toolpath: toolpath(flattenDense(sparseToDense(ordering, settings))),
+    orderingCache: populateOrderingCache(),
+    completed: true,
+    minimaFound: !stoppedEarly,
+  });
 
   return {
-    orderedMovements: ordered,
+    orderedMovements: ordering,
     cost: costRef.cost,
     iterations: iteration,
     orderingCache: populateOrderingCache(),
+    stoppedEarly,
   };
 }
 

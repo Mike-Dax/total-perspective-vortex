@@ -1,4 +1,5 @@
 import {
+  GPencil,
   GPencilJSON,
   GPencilToMovementsSettings,
   importGPencil,
@@ -6,13 +7,15 @@ import {
 import { Material, MaterialJSON } from "./material";
 import {
   importParticles,
+  Particles,
   ParticlesJSON,
   ParticlesToMovementsSettings,
 } from "./particles";
 
 export type MovementJSON = GPencilJSON | ParticlesJSON;
+export type Renderable = GPencil | Particles;
 
-export function importJson(json: MovementJSON) {
+export function importJson(json: MovementJSON): Renderable {
   switch (json.type) {
     case "gpencil":
       return importGPencil(json);
