@@ -39,7 +39,7 @@ export const OptimisationWorker = {
     sparseBagToImport: MovementJSON[],
     settings: Settings,
     partialUpdate: boolean,
-    orderingCache: OrderingCache = {}
+    orderingCache?: OrderingCache
   ) {
     const updateProgress = async (progress: Progress): Promise<Continue> => {
       progressUpdates.next(progress);
