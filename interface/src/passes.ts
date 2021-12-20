@@ -100,6 +100,18 @@ export function getTotalDuration(denseMoves: DenseMovements) {
   return cost;
 }
 
+export function getTotalCost(denseMoves: DenseMovements) {
+  // For now, use the total duration as the cost function
+  let cost = 0;
+
+  for (let index = 0; index < denseMoves.length; index++) {
+    const movement = denseMoves[index];
+    cost += movement.getCost();
+  }
+
+  return cost;
+}
+
 /**
  * Take a sparse set of movements, join them, flatten them, calculate the total duration
  */
@@ -110,7 +122,7 @@ export function sparseToCost(
   const dense = sparseToDense(sparseBag, settings);
   const flattened = flattenDense(dense);
 
-  return getTotalDuration(flattened);
+  return getTotalCost(flattened);
 }
 
 function swap(array: any[], a: number, b: number) {
@@ -199,6 +211,10 @@ export interface Progress {
   completed: boolean;
   // Whether a minima was found
   minimaFound: boolean;
+  // How much wall time spent optimising
+  timeSpent: number;
+  currentCost: number;
+  startingCost: number;
 }
 
 export type Continue = boolean;
@@ -218,6 +234,9 @@ export async function optimise(
 
   let ordering: Movement[] = [];
 
+  const costRef = { cost: sparseToCost(sparseBag, settings) };
+  const startingCost = costRef.cost;
+
   // If an orderingCache is provided, start with that, otherwise do a nearest neighbour run first.
   if (orderingCache) {
     // Copy the array, might not be necessary since this is on the other end of an IPC bridge and it's just been deserialised.
@@ -232,6 +251,12 @@ export async function optimise(
       // Sort in ascending order
       return aOrder - bOrder;
     });
+
+    const interFrameCacheCost = sparseToCost(ordering, settings);
+
+    console.log(
+      `randomCost ${costRef.cost} -> interFrameCacheCost ${interFrameCacheCost}`
+    );
   } else {
     // First run, do a nearest neighbour search, the first movement is the starting point, so start there.
 
@@ -274,6 +299,10 @@ export async function optimise(
       // Update the previousMovement
       previousMovement = closest;
     }
+
+    const nnCost = sparseToCost(ordering, settings);
+
+    console.log(`randomCost ${costRef.cost} -> nnCost ${nnCost}`);
   }
 
   // Setup our ordering cache
@@ -290,23 +319,29 @@ export async function optimise(
   };
 
   // Establish base cost to compare against
-  let costRef = { cost: sparseToCost(sparseBag, settings) };
 
   let improved = true; // Start iterating
   let iteration = 0;
   let stoppedEarly = false;
+  let startedTSP = Date.now();
 
   while (improved) {
     improved = false;
     iteration++;
 
+    const currentDense = flattenDense(sparseToDense(ordering, settings));
+    const curentDuration = getTotalDuration(currentDense);
+
     const shouldContinue = await updateProgress({
-      duration: iteration,
-      text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms`,
-      toolpath: toolpath(flattenDense(sparseToDense(ordering, settings))),
+      duration: getTotalDuration(currentDense),
+      text: `Optimised to ${Math.round(curentDuration * 100) / 100}ms`,
+      toolpath: toolpath(currentDense),
       orderingCache: populateOrderingCache(),
       completed: false,
       minimaFound: false,
+      timeSpent: Date.now() - startedTSP,
+      startingCost,
+      currentCost: costRef.cost,
     });
 
     if (!shouldContinue) {
@@ -345,14 +380,20 @@ export async function optimise(
     }
   }
 
+  const currentDense = flattenDense(sparseToDense(ordering, settings));
+  const curentDuration = getTotalDuration(currentDense);
+
   // Final status update
   await updateProgress({
-    duration: iteration,
-    text: `Optimised to ${Math.round(costRef.cost * 100) / 100}ms`,
+    duration: getTotalDuration(currentDense),
+    text: `Optimised to ${Math.round(curentDuration * 100) / 100}ms`,
     toolpath: toolpath(flattenDense(sparseToDense(ordering, settings))),
     orderingCache: populateOrderingCache(),
     completed: true,
     minimaFound: !stoppedEarly,
+    timeSpent: Date.now() - startedTSP,
+    startingCost,
+    currentCost: costRef.cost,
   });
 
   return {

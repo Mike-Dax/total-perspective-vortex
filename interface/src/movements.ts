@@ -52,6 +52,11 @@ export abstract class Movement {
   abstract getDuration: () => number;
 
   /**
+   * Get the cost of the movement in an arbritrary unit
+   */
+  abstract getCost: () => number;
+
+  /**
    * Get the starting position of this movement
    */
   abstract getStart: () => Vector3;
@@ -124,6 +129,17 @@ export class MovementGroup extends Movement {
 
     return this.movements.reduce(
       (len, movement) => movement.getLength() + len,
+      0
+    );
+  };
+
+  public getCost: () => number = () => {
+    if (this.movements.length === 0) {
+      return 0;
+    }
+
+    return this.movements.reduce(
+      (len, movement) => movement.getCost() + len,
       0
     );
   };
@@ -234,6 +250,10 @@ export class Line extends Movement {
     return this.from.distanceTo(this.to);
   };
 
+  public getCost: () => number = () => {
+    return this.getLength();
+  };
+
   public setMaxSpeed = (maxSpeed: number) => {
     this.maxSpeed = maxSpeed;
   };
@@ -320,6 +340,11 @@ export class Point extends Movement {
 
   public setMaxSpeed = (maxSpeed: number) => {
     this.maxSpeed = maxSpeed;
+  };
+
+  // Points have no cost
+  public getCost: () => number = () => {
+    return this.getLength();
   };
 
   /**
@@ -444,24 +469,28 @@ export class Transition extends Movement {
     return [this];
   };
 
+  public getCost = () => {
+    return this.getLength() / this.maxSpeed;
+  };
+
   public getLength = () => {
-    // Check if we have a cached length first since this is expensive.
-    const key = transitionKeygen(
-      this.getStart(),
-      this.getEnd(),
-      this.getDesiredEntryVelocity(),
-      this.getExpectedExitVelocity()
-    );
+    // // Check if we have a cached length first since this is expensive.
+    // const key = transitionKeygen(
+    //   this.getStart(),
+    //   this.getEnd(),
+    //   this.getDesiredEntryVelocity(),
+    //   this.getExpectedExitVelocity()
+    // );
 
-    const cached = transitionCurveCache.get(key);
+    // const cached = transitionCurveCache.get(key);
 
-    if (cached) return cached;
+    // if (cached) return cached;
 
     // Otherwise generate the curve, get the length
     const curve = this.lazyGenerateCurve();
     const length = curve.getLength();
 
-    transitionCurveCache.set(key, length);
+    // transitionCurveCache.set(key, length);
 
     return length;
   };
