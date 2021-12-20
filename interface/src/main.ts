@@ -35,7 +35,7 @@ export async function optimiseFrameBag(
   sparseBagToImport: MovementJSON[],
   settings: Settings,
   updateProgress: (progress: Progress) => Promise<Continue>,
-  orderingCache: OrderingCache = {}
+  orderingCache?: OrderingCache
 ) {
   const movements: Movement[] = [];
 
@@ -83,22 +83,41 @@ export interface FrameProgressUpdate {
   duration: number;
   completed: boolean;
   minimaFound: boolean;
+  timeSpent: number;
+  startingCost: number;
+  currentCost: number;
+  toolpath: Toolpath;
+}
+
+export class Deferred<T> {
+  promise!: Promise<T>;
+  resolve!: (val: T) => void;
+  reject!: (err: any) => void;
+  constructor() {
+    this.promise = new Promise<T>((resolve, reject) => {
+      this.resolve = resolve;
+      this.reject = reject;
+    });
+  }
 }
 
 /**
  * A persistent orchestrator of frame optimisation.
  */
 export class ToolpathGenerator {
-  private viewportFrame: number = 100;
+  private viewportFrame: number = 0;
+  private requestedFrame: number = 0;
 
   /**
    * The list of frames that aren't finished
    */
   private unfinishedFrames: number[] = [];
-  private currentlyOptimising: Set<number> = new Set();
   private frameState: Map<number, FRAME_STATE> = new Map();
   private frameCache: Map<number, OrderingCache> = new Map();
   private toolpaths: Map<number, Toolpath> = new Map();
+
+  private frameSubscriptions: Map<number, Deferred<Toolpath>> = new Map();
+  private onCompleteDeferred = new Deferred<void>();
 
   private movementJSON: Map<number, MovementJSON[]> = new Map();
 
@@ -115,6 +134,8 @@ export class ToolpathGenerator {
     this.scheduleFrame = this.scheduleFrame.bind(this);
     this.getClosestFrameCache = this.getClosestFrameCache.bind(this);
     this.setViewedFrame = this.setViewedFrame.bind(this);
+    this.request = this.request.bind(this);
+    this.onComplete = this.onComplete.bind(this);
     this.updateSettings = this.updateSettings.bind(this);
     this.teardown = this.teardown.bind(this);
 
@@ -129,6 +150,8 @@ export class ToolpathGenerator {
     this.frameState.clear();
     this.frameCache.clear();
     this.movementJSON.clear();
+    this.frameSubscriptions.clear();
+    this.onCompleteDeferred = new Deferred<void>();
   }
 
   public ingest(
@@ -167,7 +190,9 @@ export class ToolpathGenerator {
    */
   private sortWorkPriority() {
     this.unfinishedFrames.sort((a, b) => {
-      // The viewport frames have highest priority
+      // The requested frame and viewport frame have highest priority
+      if (a === this.requestedFrame) return -1;
+      if (b === this.requestedFrame) return 1;
       if (a === this.viewportFrame) return -1;
       if (b === this.viewportFrame) return 1;
 
@@ -196,15 +221,14 @@ export class ToolpathGenerator {
    * Diff the current pool state
    */
   scheduleWork() {
-    console.log(
-      `scheduling work, queue is [${this.currentWorkQueue().join(", ")}]`
-    );
+    // console.log(
+    //   `scheduling work, queue is [${this.currentWorkQueue().join(", ")}]`
+    // );
 
     // Schedule the current work queue
     for (const frameNumber of this.currentWorkQueue()) {
       switch (this.frameState.get(frameNumber)) {
         case FRAME_STATE.UNOPTIMISED:
-          console.log(`frame ${frameNumber} is unoptimised`);
           // Start a partial optimisation pass
           this.scheduleFrame(frameNumber, true);
           continue;
@@ -216,7 +240,6 @@ export class ToolpathGenerator {
           continue;
         case FRAME_STATE.OPTIMISED_PARTIALLY:
           // Start a full optimisation pass
-          console.log(`frame ${frameNumber} is partially optimised`);
           this.scheduleFrame(frameNumber, false);
           continue;
         case FRAME_STATE.OPTIMISED_FULLY:
@@ -237,11 +260,23 @@ export class ToolpathGenerator {
       this.unfinishedFrames = this.unfinishedFrames.filter(
         (fN) => fN !== frameNumber
       );
+
+      // Notify any listeners
+      if (this.frameSubscriptions.has(frameNumber)) {
+        this.frameSubscriptions
+          .get(frameNumber)!
+          .resolve(this.toolpaths.get(frameNumber)!);
+      }
+
+      // Check if there's nothing left
+      if (this.unfinishedFrames.length === 0) {
+        this.onCompleteDeferred.resolve();
+      }
     }
   }
 
-  scheduleFrame(frameNumber: number, partialUpdate: boolean) {
-    if (partialUpdate) {
+  scheduleFrame(frameNumber: number, partialOptimisation: boolean) {
+    if (partialOptimisation) {
       this.setFrameState(frameNumber, FRAME_STATE.OPTIMISING_PARTIALLY);
     } else {
       this.setFrameState(frameNumber, FRAME_STATE.OPTIMISING_FULLY);
@@ -266,6 +301,10 @@ export class ToolpathGenerator {
           duration: progress.duration,
           completed: progress.completed,
           minimaFound: progress.minimaFound,
+          timeSpent: progress.timeSpent,
+          startingCost: progress.startingCost,
+          currentCost: progress.currentCost,
+          toolpath: progress.toolpath,
         });
 
         // Update our status if this is the last progress update
@@ -305,8 +344,8 @@ export class ToolpathGenerator {
       const { duration } = await worker.optimise(
         this.movementJSON.get(frameNumber)!,
         this.settings,
-        partialUpdate, // if this is a partial update, stop after the first iteration
-        this.getClosestFrameCache(frameNumber)
+        partialOptimisation, // if this is a partial update, stop after the first iteration
+        partialOptimisation ? undefined : this.getClosestFrameCache(frameNumber) // Only provide a cache for the full optimisation
       );
 
       sub.unsubscribe();
@@ -345,16 +384,38 @@ export class ToolpathGenerator {
 
   public setViewedFrame(frameNumber: number) {
     this.viewportFrame = frameNumber;
+
+    this.scheduleWork();
+  }
+
+  public async request(frameNumber: number) {
+    // If this frame is complete, immediately resolve with the toolpath
+    if (!this.unfinishedFrames.includes(frameNumber)) {
+      return this.toolpaths.get(frameNumber)!;
+    }
+
+    this.requestedFrame = frameNumber;
+
+    this.scheduleWork();
+
+    // If we already have a wait on this frame
+    if (this.frameSubscriptions.has(frameNumber)) {
+      return this.frameSubscriptions.get(frameNumber)!.promise;
+    }
+
+    // Create a deferred for this frame's toolpath
+    const deferred = new Deferred<Toolpath>();
+
+    this.frameSubscriptions.set(frameNumber, deferred);
+
+    return deferred.promise;
+  }
+
+  public onComplete() {
+    return this.onCompleteDeferred.promise;
   }
 
   updateSettings(settings: Settings) {}
 
   teardown() {}
 }
-
-// Need to do a run of every frame, only doing the nearest neighbour optimisation then immediately returning.
-// Second run of every frame, but full optimisation pass.
-// All frames before the priority frame are cancelled.
-// The priority frame needs to cancel on the next pass.
-// When settings update, reset the whole thing
-// The viewed frame also gets priority, potentially cancelling the highest numbered frame if there are no slots.
