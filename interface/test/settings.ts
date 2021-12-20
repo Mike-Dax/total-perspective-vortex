@@ -28,7 +28,7 @@ export const defaultSettings: Settings = {
   optimisation: {
     startingPoint: new Vector3(0, 0, 0),
     endingPoint: new Vector3(0, 0, 0),
-    maxSpeed: 20,
-    waitAtStartDuration: 1000,
+    maxSpeed: 300,
+    waitAtStartDuration: 0,
   },
 };

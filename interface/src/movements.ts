@@ -406,15 +406,15 @@ export function isTransition(movement: Movement): movement is Transition {
   return movement.type === "transition";
 }
 
-const transitionCurveCache = new LRUCache<string, number>({
-  maxSize: 1000, // store 1000 lengths by default
-});
+// const transitionCurveCache = new LRUCache<string, number>({
+//   maxSize: 1000, // store 1000 lengths by default
+// });
 
-function transitionKeygen(a: Vector3, b: Vector3, c: Vector3, d: Vector3) {
-  return `${a.x},${a.y},${a.z}-${b.x},${b.y},${b.z}-${c.x},${c.y},${c.z}-${d.x},${d.y},${d.z}`;
-}
+// function transitionKeygen(a: Vector3, b: Vector3, c: Vector3, d: Vector3) {
+//   return `${a.x},${a.y},${a.z}-${b.x},${b.y},${b.z}-${c.x},${c.y},${c.z}-${d.x},${d.y},${d.z}`;
+// }
 
-let cacheHits = 0;
+// let cacheHits = 0;
 
 /**
  * A transition is a move from one Movement to another.
