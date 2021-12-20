@@ -30,9 +30,13 @@ export function sparseToDense(
   );
 
   // Middle
-  for (const movement of sparseBag) {
+  for (let index = 0; index < sparseBag.length; index++) {
+    const movement = sparseBag[index];
+
     // Set the max speed of the movement so velocities are scaled
     movement.setMaxSpeed(settings.optimisation.maxSpeed);
+
+    // TODO: If we're in the middle of a run of Points, build a Catmull spline that goes between them
 
     // Build our transition movement from the old movement to the new
     const transition = new Transition(
@@ -81,7 +85,9 @@ export function sparseToDense(
 export function flattenDense(denseBag: DenseMovements): DenseMovements {
   let denseFlatList: DenseMovements = declareDense([]);
 
-  for (const movement of denseBag) {
+  for (let index = 0; index < denseBag.length; index++) {
+    const movement = denseBag[index];
+
     denseFlatList.push(...movement.flatten());
   }
 
@@ -237,6 +243,8 @@ export async function optimise(
   const costRef = { cost: sparseToCost(sparseBag, settings) };
   const startingCost = costRef.cost;
 
+  let method = "blender order";
+
   // If an orderingCache is provided, start with that, otherwise do a nearest neighbour run first.
   if (orderingCache) {
     // Copy the array, might not be necessary since this is on the other end of an IPC bridge and it's just been deserialised.
@@ -254,9 +262,22 @@ export async function optimise(
 
     const interFrameCacheCost = sparseToCost(ordering, settings);
 
-    console.log(
-      `randomCost ${costRef.cost} -> interFrameCacheCost ${interFrameCacheCost}`
-    );
+    // console.log(
+    //   `randomCost ${
+    //     costRef.cost
+    //   } -> interFrameCacheCost ${interFrameCacheCost} (${
+    //     interFrameCacheCost > costRef.cost ? "ditching cache" : "using cache"
+    //   })`
+    // );
+
+    // Make sure this is an improvement
+    if (interFrameCacheCost >= costRef.cost) {
+      // not an improvement, reset
+      ordering = sparseBag.slice();
+    } else {
+      costRef.cost = interFrameCacheCost;
+      method = "cache";
+    }
   } else {
     // First run, do a nearest neighbour search, the first movement is the starting point, so start there.
 
@@ -302,7 +323,20 @@ export async function optimise(
 
     const nnCost = sparseToCost(ordering, settings);
 
-    console.log(`randomCost ${costRef.cost} -> nnCost ${nnCost}`);
+    // console.log(
+    //   `randomCost ${costRef.cost} -> nnCost ${nnCost} (${
+    //     nnCost > costRef.cost ? "ditching NN" : "using NN"
+    //   })`
+    // );
+
+    // Make sure this is an improvement
+    if (nnCost >= costRef.cost) {
+      // not an improvement, reset
+      ordering = sparseBag.slice();
+    } else {
+      costRef.cost = nnCost;
+      method = "nearest neighbour";
+    }
   }
 
   // Setup our ordering cache
@@ -333,8 +367,10 @@ export async function optimise(
     const curentDuration = getTotalDuration(currentDense);
 
     const shouldContinue = await updateProgress({
-      duration: getTotalDuration(currentDense),
-      text: `Optimised to ${Math.round(curentDuration * 100) / 100}ms`,
+      duration: curentDuration,
+      text: `Optimised to ${
+        Math.round(curentDuration * 100) / 100
+      }ms via ${method}`,
       toolpath: toolpath(currentDense),
       orderingCache: populateOrderingCache(),
       completed: false,
@@ -348,6 +384,8 @@ export async function optimise(
       stoppedEarly = true;
       break;
     }
+
+    method = "2-opt";
 
     iteration: for (let i = 0; i < sparseLength - 1; i++) {
       for (let j = i + 1; j < sparseLength; j++) {
