@@ -149,6 +149,7 @@ export class ToolpathGenerator {
     this.unfinishedFrames = [];
     this.frameState.clear();
     this.frameCache.clear();
+    this.toolpaths.clear();
     this.movementJSON.clear();
     this.frameSubscriptions.clear();
     this.onCompleteDeferred = new Deferred<void>();
@@ -221,10 +222,6 @@ export class ToolpathGenerator {
    * Diff the current pool state
    */
   scheduleWork() {
-    // console.log(
-    //   `scheduling work, queue is [${this.currentWorkQueue().join(", ")}]`
-    // );
-
     // Schedule the current work queue
     for (const frameNumber of this.currentWorkQueue()) {
       switch (this.frameState.get(frameNumber)) {
@@ -266,6 +263,9 @@ export class ToolpathGenerator {
         this.frameSubscriptions
           .get(frameNumber)!
           .resolve(this.toolpaths.get(frameNumber)!);
+
+        // And delete the frameSub
+        this.frameSubscriptions.delete(frameNumber);
       }
 
       // Check if there's nothing left
@@ -349,19 +349,6 @@ export class ToolpathGenerator {
       );
 
       sub.unsubscribe();
-
-      // Do a check to make sure it's not in an optimising state when the worker is gone
-      switch (this.frameState.get(frameNumber)!) {
-        case FRAME_STATE.OPTIMISING_PARTIALLY:
-          this.setFrameState(frameNumber, FRAME_STATE.OPTIMISING_PARTIALLY);
-          return;
-        case FRAME_STATE.OPTIMISING_FULLY:
-          this.setFrameState(frameNumber, FRAME_STATE.OPTIMISED_PARTIALLY);
-          return;
-        default:
-          // Everything went fine
-          break;
-      }
     });
   }
 
@@ -415,7 +402,22 @@ export class ToolpathGenerator {
     return this.onCompleteDeferred.promise;
   }
 
-  updateSettings(settings: Settings) {}
+  updateSettings(settings: Settings) {
+    // Re-injest everything with new settings
 
-  teardown() {}
+    const movementJSON: {
+      [frameNumber: number]: MovementJSON[];
+    } = {};
+
+    for (const [frameNumber, json] of this.movementJSON) {
+      movementJSON[frameNumber] = json;
+    }
+
+    this.ingest(movementJSON, settings, this.onUpdate);
+  }
+
+  teardown() {
+    this.reset();
+    return this.pool.terminate(true);
+  }
 }
