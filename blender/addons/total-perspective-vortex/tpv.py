@@ -57,7 +57,8 @@ def serialise_vector(vec: list[float]):
 def serialise_position(vec: list[float], context, obj):
     world_coordinate = obj.matrix_world @ vec  # Multiply by the world matrix
 
-    scale_length = context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
+    # This scale is manually defined
+    scale_length = 0.01 # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
 
     return [serialise_float(p / scale_length) for p in world_coordinate]
 
