@@ -49,19 +49,28 @@ def save_file(file_path: str, contents: dict):
 def serialise_color(color: mathutils.Color):
     return [color.r, color.g, color.b, 1]
 
-
+# Don't transform from Blender coordinate system, the Delta shares the same coordinate system, three is different
 def serialise_vector(vec: list[float]):
     return [serialise_float(p) for p in vec]
 
+
+def serialise_quaternion(quat: mathutils.Quaternion):
+    return [serialise_float(quat.x), serialise_float(quat.y), serialise_float(quat.z), serialise_float(quat.w)]
+
+
+SCALE_DIVISOR = 0.01
 
 def serialise_position(vec: list[float], context, obj):
     world_coordinate = obj.matrix_world @ vec  # Multiply by the world matrix
 
     # This scale is manually defined
-    scale_length = 0.01 # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
+    scale_length = SCALE_DIVISOR # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
 
-    return [serialise_float(p / scale_length) for p in world_coordinate]
-
+    return [
+        serialise_float(world_coordinate.x / scale_length),
+        serialise_float(world_coordinate.y / scale_length),
+        serialise_float(world_coordinate.z / scale_length),
+    ]
 
 # Up to 6 decimals of precision
 def serialise_float(f: float):
@@ -226,8 +235,8 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
             particle_struct = dict({
                 "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
-                "location": serialise_position(particle.location, context, pt_obj),
-                "rotation": serialise_vector(particle.rotation),
+                "location": serialise_position(particle.location - pt_obj.location, context, pt_obj),
+                "quaternion": serialise_quaternion(particle.rotation),
                 "velocity": serialise_vector(particle.velocity)
             })
             system_struct["particles"].append(particle_struct)
@@ -237,6 +246,26 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
     if has_content:
         save_file(get_output_filepath(context, frame_number, pt_obj.name), save_struct)
+
+
+def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
+    sensor_height = cm_obj.data.sensor_height
+    sensor_width = cm_obj.data.sensor_width
+
+    save_struct = dict({
+        "type": "camera",
+        "frame": frame_number,
+        "name": cm_obj.name,
+        "focal_length": cm_obj.data.lens,
+        "sensor_height": sensor_height,
+        "sensor_width": sensor_width,
+        "position": serialise_position(cm_obj.location, context, cm_obj),
+        "rotation": serialise_vector(cm_obj.rotation_euler),
+        "near": serialise_float(cm_obj.data.clip_start / SCALE_DIVISOR),
+        "far": serialise_float(cm_obj.data.clip_end / SCALE_DIVISOR),
+    })
+
+    save_file(get_output_filepath(context, frame_number, cm_obj.name), save_struct)
 
 
 def get_random_color():
@@ -291,6 +320,9 @@ class OBJECT_OT_TPVExport(Operator):
                 if selObj.type == "PARTICLES" or selObj.type == "MESH":
                     particle_system_export(self, bpy.context, frame_number, selObj)
 
+
+            # Export the active camera regardless of which ones are selected
+            camera_export(self, bpy.context, frame_number, bpy.context.scene.camera)
 
 
 
