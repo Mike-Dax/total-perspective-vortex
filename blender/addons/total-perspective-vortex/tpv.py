@@ -268,6 +268,25 @@ def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
     save_file(get_output_filepath(context, frame_number, cm_obj.name), save_struct)
 
 
+def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_light = li_obj.evaluated_get(deps_graph)
+
+    save_struct = dict({
+        "type": "light",
+        "frame": frame_number,
+        "name": evaluated_light.name,
+        "material": dict({
+            "type": "color",
+            "color": serialise_vector(evaluated_light.data.color)
+        }),
+        "position": serialise_position(evaluated_light.location, context, evaluated_light),
+    })
+
+    save_file(get_output_filepath(context, frame_number, li_obj.name), save_struct)
+
+
 def get_random_color():
     ''' generate rgb using a list comprehension '''
     r, g, b = [random.random() for i in range(3)]
@@ -316,10 +335,17 @@ class OBJECT_OT_TPVExport(Operator):
 
                 if selObj.type == "GPENCIL":
                     grease_pencil_export(self, bpy.context, frame_number, selObj)
+                    continue
 
                 if selObj.type == "PARTICLES" or selObj.type == "MESH":
                     particle_system_export(self, bpy.context, frame_number, selObj)
+                    continue
 
+                if selObj.type == "LIGHT":
+                    light_export(self, bpy.context, frame_number, selObj)
+                    continue
+
+                print("Unknown object type selected:", selObj.type)
 
             # Export the active camera regardless of which ones are selected
             camera_export(self, bpy.context, frame_number, bpy.context.scene.camera)
