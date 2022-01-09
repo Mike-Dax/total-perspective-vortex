@@ -287,6 +287,49 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
     save_file(get_output_filepath(context, frame_number, li_obj.name), save_struct)
 
 
+def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_curve = cu_obj.evaluated_get(deps_graph)
+
+    splines: bpy.types.CurveSplines = evaluated_curve.data.splines
+
+    save_struct = dict({
+        "type": "curves",
+        "frame": frame_number,
+        "name": cu_obj.name,
+        "splines": [],
+    })
+
+    for spline in splines:
+        material = evaluated_curve.data.materials[spline.material_index]
+
+        spline_struct = dict({
+            "type": spline.type, # [‘POLY’, ‘BEZIER’, ‘BSPLINE’, ‘CARDINAL’, ‘NURBS’]
+            "material": serialise_material(material.name),
+            "points": [],
+        })
+        save_struct["splines"].append(spline_struct)
+
+        if spline.type == "BEZIER":
+            for point in spline.bezier_points:
+                point: bpy.types.BezierSplinePoint = point
+
+                point_struct = dict({
+                    "co": serialise_position(point.co, context, evaluated_curve),
+                    "handle_left": serialise_position(point.handle_left, context, evaluated_curve),
+                    "handle_right": serialise_position(point.handle_right, context, evaluated_curve),
+                    "handle_left_type": point.handle_left_type,
+                    "handle_right_type": point.handle_right_type,
+                })
+                spline_struct["points"].append(point_struct)
+        else:
+            # TODO: Other types of splines
+            pass
+
+    save_file(get_output_filepath(context, frame_number, cu_obj.name), save_struct)
+
+
 def get_random_color():
     ''' generate rgb using a list comprehension '''
     r, g, b = [random.random() for i in range(3)]
@@ -343,6 +386,10 @@ class OBJECT_OT_TPVExport(Operator):
 
                 if selObj.type == "LIGHT":
                     light_export(self, bpy.context, frame_number, selObj)
+                    continue
+
+                if selObj.type == "CURVE":
+                    curve_export(self, bpy.context, frame_number, selObj)
                     continue
 
                 print("Unknown object type selected:", selObj.type)
