@@ -227,7 +227,7 @@ export function sparseToCost(movements: Movement[]): number {
   return d2Total
 }
 
-function swap(array: any[], a: number, b: number) {
+export function swap(array: any[], a: number, b: number) {
   const temp = array[a]
   array[a] = array[b]
   array[b] = temp
@@ -268,7 +268,7 @@ function optimiseByCache(sparseBag: Movement[], orderingCache: OrderingCache) {
   return movements
 }
 
-function optimiseBySearch(sparseBag: Movement[]) {
+export function optimiseBySearch(sparseBag: Movement[]) {
   if (sparseBag.length < 2) {
     return sparseBag
   }
@@ -277,7 +277,7 @@ function optimiseBySearch(sparseBag: Movement[]) {
 
   // Pick a random movement to start at, remove it from the array
   let previousMovement = toOrder.splice(
-    Math.floor(Math.random() * toOrder.length),
+    0, // start at 0
     1, // grab one
   )[0] // splice returns an array of the deleted items, index 0 is our starting point
   const nnOrdering = [previousMovement]
@@ -343,7 +343,12 @@ export function optimise2Opt(sparseBag: Movement[], timeLimit = 0) {
     iteration++
 
     if (timeLimit > 0 && Date.now() - start > timeLimit) {
-      return { ordering, iteration, completed: false }
+      return {
+        ordering,
+        iteration,
+        completed: false,
+        time: Date.now() - start,
+      }
     }
 
     // Start and end points are fixed with this algorithm
@@ -394,7 +399,6 @@ export function optimise2Opt(sparseBag: Movement[], timeLimit = 0) {
         // Do the operations of the winner
         if (smallest === current) {
           // No improvement
-          // continue // try the next one
         } else if (smallest === flipI) {
           ordering[i].flip()
           cost = cost - current + flipI
@@ -429,13 +433,11 @@ export function optimise2Opt(sparseBag: Movement[], timeLimit = 0) {
           cost = cost - current + flipIJSwapIJ
           improved = true
         }
-
-        // continue iteration
       }
     }
   }
 
-  return { ordering, iteration, completed: true }
+  return { ordering, iteration, completed: true, time: Date.now() - start }
 }
 
 /**
