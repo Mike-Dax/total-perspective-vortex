@@ -1,33 +1,16 @@
-import { blankMaterial } from "../src/material";
-import { Point } from "../src/movements";
-import { sparseToCost } from "../src/passes";
+import { Point } from "../src/optimiser/movements";
+import { sparseToCost } from "../src/optimiser/passes";
 import { Vector3 } from "three";
-
-import { defaultSettings } from "./settings";
+import { defaultTransitionMaterial } from "../src/optimiser/material";
 
 describe("Cost function", () => {
-  xit(`can cost a tour`, () => {
+  it(`can cost a tour`, () => {
     const movements = [
-      new Point(new Vector3(0, 0, 0), 0, blankMaterial),
-      new Point(new Vector3(1, 0, 0), 0, blankMaterial),
+      new Point(new Vector3(0, 0, 0), 0, defaultTransitionMaterial, `A`),
+      new Point(new Vector3(1, 0, 0), 0, defaultTransitionMaterial, `B`),
     ];
 
-    const cost = sparseToCost(movements, defaultSettings);
-
-    expect(cost).toBeTruthy();
-  });
-
-  xit(`can cost a tour`, () => {
-    const movements = [
-      new Point(new Vector3(0, 0, 0), 10, blankMaterial),
-      new Point(new Vector3(1, 0, 0), 0, blankMaterial),
-      new Point(new Vector3(0, 1, 0), 0, blankMaterial),
-      new Point(new Vector3(0, 0, 1), 0, blankMaterial),
-      new Point(new Vector3(0, 1, 1), 0, blankMaterial),
-      new Point(new Vector3(1, 1, 1), 0, blankMaterial),
-    ];
-
-    const cost = sparseToCost(movements, defaultSettings);
+    const cost = sparseToCost(movements);
 
     expect(cost).toBeTruthy();
   });

@@ -11,6 +11,7 @@
     "@swc/helpers": "^0.3.2",
     "@types/jest": "^27.0.3",
     "@types/node": "^16.11.12",
+    "@types/react": "^17.0.38",
     "@types/three": "0.135.0",
     "jest": "^27.4.4",
     "ts-jest": "^27.1.1",
@@ -18,6 +19,12 @@
     "typescript": "^4.5.3"
   },
   "dependencies": {
+    "@blueprintjs/core": "^3.52.0",
+    "@react-three/drei": "^8.4.0",
+    "@react-three/fiber": "^7.0.24",
+    "immer": "^9.0.12",
+    "react": "^17.0.2",
+    "react-dom": "^17.0.2",
     "threads": "^1.7.0",
     "three": "0.135.0",
     "typescript-lru-cache": "^1.2.3"
