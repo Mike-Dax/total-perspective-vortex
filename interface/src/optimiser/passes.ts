@@ -6,6 +6,7 @@ import {
   isPoint,
   isTransit,
   Line,
+  MILLISECONDS_IN_SECOND,
   Movement,
   Point,
   PointTransition,
@@ -18,6 +19,8 @@ import { Settings } from './settings'
 import { MathUtils, Vector3 } from 'three'
 import { defaultTransitionMaterial } from './material'
 import { MixMaterial } from './materials/MixMaterial'
+import xxhash, { XXHash } from 'xxhash-wasm'
+import { Permutor } from './permutor'
 
 /**
  * Flatten any grouped movements into simple movements
@@ -85,41 +88,6 @@ export function sparseToDense(
       continue
     }
 
-    // Points are visited by catmulls if their duration is 0, and if we have available control points
-    if (
-      isPoint(previousMovement) &&
-      isPoint(movement) &&
-      movement.duration === 0 &&
-      index >= 2 &&
-      index < flattened.length - 1
-    ) {
-      const movementPrevPrev = flattened[index - 2]
-      const movementPrev = previousMovement
-      const movementCurrent = movement
-      const movementNext = flattened[index + 1]
-
-      // Build our transition movement from the old movement to the new
-      const transition = new PointTransition(
-        movementPrevPrev,
-        movementPrev,
-        movementCurrent,
-        movementNext,
-        defaultTransitionMaterial,
-      )
-
-      transition.setMaxSpeed(settings.optimisation.transitionMaxSpeed)
-
-      // Add the transition to the dense bag
-      denseMovements.push(transition)
-
-      // Add the movement to the dense bag
-      denseMovements.push(movement)
-
-      // Update the last movement
-      previousMovement = movement
-      continue
-    }
-
     // If the last movement and this movement are both lines, and their end and start points match up
     // And their velocity angles aren't too dissimilar, reduce the length of the lines and do a transition inline
     if (
@@ -164,6 +132,124 @@ export function sparseToDense(
 
       // Update the last movement
       previousMovement = movement
+      continue
+    }
+
+    // Overrides any other behaviour
+    if (settings.optimisation.disableShapedTransitions) {
+      // Build our transition movement from the old movement to the new, just use a simple Line
+      const transit = new Line(
+        previousMovement.getEnd(),
+        movement.getStart(),
+        defaultTransitionMaterial,
+        TRANSITION_OBJECT_ID,
+      )
+      transit.setMaxSpeed(settings.optimisation.transitionMaxSpeed)
+
+      // Add the transition to the dense bag
+      denseMovements.push(transit)
+
+      // Add the movement to the dense bag
+      denseMovements.push(movement)
+
+      // Update the last movement
+      previousMovement = movement
+      continue
+    }
+
+    // Points are visited by catmulls if their duration is 0, and if we have available control points
+    if (
+      isPoint(previousMovement) &&
+      isPoint(movement) &&
+      movement.duration === 0 &&
+      index >= 2 &&
+      index < flattened.length - 1
+    ) {
+      const movementPrevPrev = flattened[index - 2]
+      const movementPrev = previousMovement
+      const movementCurrent = movement
+      const movementNext = flattened[index + 1]
+
+      // Build our transition movement from the old movement to the new
+      const transition = new PointTransition(
+        movementPrevPrev,
+        movementPrev,
+        movementCurrent,
+        movementNext,
+        defaultTransitionMaterial,
+      )
+
+      transition.setMaxSpeed(settings.optimisation.transitionMaxSpeed)
+
+      // Add the transition to the dense bag
+      denseMovements.push(transition)
+
+      // Add the movement to the dense bag
+      denseMovements.push(movement)
+
+      // Update the last movement
+      previousMovement = movement
+      continue
+    }
+
+    if (settings.optimisation.lineRunUp > 0 && isLine(movement)) {
+      const endPoint = movement.getStart()
+      const backwardDirection = movement
+        .getDesiredEntryVelocity()
+        .normalize()
+        .multiplyScalar(-1)
+      const startPoint = backwardDirection
+        .multiplyScalar(settings.optimisation.lineRunUp * movement.getLength())
+        .add(endPoint)
+
+      const runUp = new Line(
+        startPoint,
+        endPoint,
+        defaultTransitionMaterial,
+        TRANSITION_OBJECT_ID,
+      )
+      // Set the speed to the incoming line's speed, not the transition speed.
+      runUp.setMaxSpeed(settings.optimisation.maxSpeed)
+
+      // Build our transition movement from the old movement to the new
+      const transition = new Transition(
+        previousMovement,
+        runUp,
+        defaultTransitionMaterial,
+      )
+      transition.setMaxSpeed(settings.optimisation.transitionMaxSpeed)
+
+      // Add the transition to the dense bag
+      denseMovements.push(transition)
+
+      // Add the run up
+      denseMovements.push(runUp)
+
+      // Add the movement to the dense bag
+      denseMovements.push(movement)
+
+      const startPointRunOut = movement.getEnd()
+      const backwardDirectionRunOut = movement
+        .getExpectedExitVelocity()
+        .normalize()
+      const endPointRunOut = backwardDirectionRunOut
+        .multiplyScalar(settings.optimisation.lineRunUp * movement.getLength())
+        .add(startPointRunOut)
+
+      const runOut = new Line(
+        startPointRunOut,
+        endPointRunOut,
+        defaultTransitionMaterial,
+        TRANSITION_OBJECT_ID,
+      )
+      // Set the speed to the incoming line's speed, not the transition speed.
+      runOut.setMaxSpeed(settings.optimisation.maxSpeed)
+
+      denseMovements.push(runOut)
+
+      // Update the last movement
+      previousMovement = runOut
+
       continue
     }
 
@@ -225,6 +311,61 @@ export function sparseToCost(movements: Movement[]): number {
   // }
 
   return d2Total
+}
+
+export function hashTour(
+  movements: Movement[],
+  createHasher: (seed?: number) => XXHash<number>,
+) {
+  const hasher = createHasher()
+
+  for (let index = 0; index < movements.length; index++) {
+    const movement = movements[index]
+    hasher.update(movement.interFrameID)
+  }
+
+  return hasher.digest()
+}
+
+function applyOperations(
+  ordering: Movement[],
+  copyToAlternates: { signal: boolean },
+  queue: Map<number, Movement[]>,
+  enqueued: Set<number>,
+  leftIndex: number,
+  rightIndex: number,
+  flipLeft: boolean,
+  flipRight: boolean,
+  swap: boolean,
+  createHasher: (seed?: number) => XXHash<number>,
+) {
+  // Copy the ordering if we're copying this operation into the queue list
+  const mutableOrdering = copyToAlternates.signal ? ordering.slice() : ordering
+
+  if (flipLeft) {
+    mutableOrdering[leftIndex].flip()
+  }
+  if (flipRight) {
+    mutableOrdering[rightIndex].flip()
+  }
+  if (swap) {
+    const temp = mutableOrdering[leftIndex]
+    mutableOrdering[leftIndex] = mutableOrdering[rightIndex]
+    mutableOrdering[rightIndex] = temp
+  }
+
+  if (copyToAlternates.signal) {
+    const hash = hashTour(mutableOrdering, createHasher)
+
+    // Only add this tour possibility if we haven't seen it before
+    if (!enqueued.has(hash)) {
+      enqueued.add(hash)
+      queue.set(hash, mutableOrdering)
+    }
+  } else {
+    // All subsequent operations should copy to alternates
+    copyToAlternates.signal = true
+  }
 }
 
 export function swap(array: any[], a: number, b: number) {
@@ -330,6 +471,63 @@ export function optimiseBySearch(sparseBag: Movement[]) {
   return nnOrdering
 }
 
+/**
+ * Warning, has factorial time complexity.
+ *
+ * Takes 5s for 10 movements
+ * Takes 15s for 11 movements
+ * Takes 112s for 12 movements
+ * Don't bother after 12.
+ */
+export function optimiseBruteForce(
+  permutor: Permutor<Movement>,
+  best: {
+    tour: Movement[]
+    hash: number
+    cost: number
+  },
+  createHasher: (seed?: number) => XXHash<number>,
+  timeLimit = 0,
+) {
+  const start = Date.now()
+
+  let tourIndex = 0
+
+  while (permutor.hasNext()) {
+    const time = Date.now() - start
+
+    // Check if the time limit has been exceeded
+    if (timeLimit > 0 && time > timeLimit) {
+      return { iterations: tourIndex + 1, completed: false, time: time }
+    }
+
+    tourIndex++
+
+    const currentOrdering = permutor.next()
+    const cost = sparseToCost(currentOrdering)
+
+    // If this tour isn't better, check the next one
+    if (cost > best.cost) {
+      continue
+    }
+
+    if (cost < best.cost) {
+      const hash = hashTour(currentOrdering, createHasher)
+
+      // If we have a new best tour, set it
+      best.tour = currentOrdering
+      best.hash = hash
+      best.cost = cost
+    }
+  }
+
+  return {
+    iterations: tourIndex + 1,
+    completed: true,
+    time: Date.now() - start,
+  }
+}
+
 const n = false
 const f = true
 
@@ -352,255 +550,241 @@ function d(
   throw new Error(`Unreachable`)
 }
 
-export function optimise2Opt(sparseBag: Movement[], timeLimit = 0) {
-  const ordering: Movement[] = sparseBag.slice()
-
-  let improved = true // Start iterating
-  let iteration = 0
-  let cost = sparseToCost(ordering)
+/**
+ * Cannot be called with a tour below 4 moves!
+ */
+export function optimise2Opt(
+  queue: Map<number, Movement[]>,
+  enqueued: Set<number>,
+  best: {
+    tour: Movement[]
+    hash: number
+    cost: number
+  },
+  createHasher: (seed?: number) => XXHash<number>,
+  timeLimit = 0,
+) {
   const start = Date.now()
 
-  while (improved) {
-    improved = false
-    iteration++
+  let tourIndex = 0
 
-    if (timeLimit > 0 && Date.now() - start > timeLimit) {
-      return {
-        ordering,
-        iteration,
-        completed: false,
-        time: Date.now() - start,
-      }
+  while (queue.size > 0) {
+    tourIndex++
+
+    let [hash, currentOrdering]: [number, Movement[]] = queue
+      .entries()
+      .next().value
+
+    // Remove the candidate from the queue
+    queue.delete(hash)
+
+    // Iteratively improve upon the candidate tour
+
+    let cost = sparseToCost(currentOrdering)
+
+    // If this tour candidate is no longer on equal footing with the current best tour, bail immediately
+    if (cost > best.cost) {
+      continue
     }
 
-    // The main iteration loop can't flip or swap the ends, so do that up here
-    {
-      // Test flipping the start
-      const A = ordering[0]
-      const B = ordering[1]
+    let improved = true
 
-      const dAnB = A.getEnd().distanceTo(B.getStart())
-      const dAfB = A.getStart().distanceTo(B.getEnd())
+    while (improved) {
+      improved = false
 
-      if (dAfB < dAnB) {
-        A.flip()
+      const n = false
+      const f = true
 
-        const delta = dAnB - dAfB
+      for (let b = 1; b < currentOrdering.length - 2; b++) {
+        const time = Date.now() - start
+        // Check if the time limit has been exceeded
+        if (timeLimit > 0 && time > timeLimit) {
+          const hash = hashTour(currentOrdering, createHasher)
 
-        cost = cost - delta
-        improved = true
-      }
-    }
-    {
-      // Test flipping the end
-      const E = ordering[ordering.length - 2]
-      const F = ordering[ordering.length - 1]
+          // Add this tour back into the queue since we didn't get to finish it.
+          if (!enqueued.has(hash)) {
+            queue.set(hash, currentOrdering)
+          }
 
-      const dEFn = E.getEnd().distanceTo(F.getStart())
-      const dEFf = E.getEnd().distanceTo(F.getEnd())
+          return { iterations: tourIndex + 1, completed: false, time: time }
+        }
 
-      if (dEFf < dEFn) {
-        F.flip()
+        for (let e = b + 1; e < currentOrdering.length - 1; e++) {
+          let operation = ''
 
-        const delta = dEFn - dEFf
+          let current = 0
+          let flipB = 0
+          let flipE = 0
+          let flipBE = 0
+          let swapBE = 0
+          let flipBSwapBE = 0
+          let flipESwapBE = 0
+          let flipBESwapBE = 0
 
-        cost = cost - delta
-        improved = true
-      }
-    }
-    {
-      // Test a left rotation
-      const A = ordering[0]
-      const B = ordering[1]
-      const C = ordering[ordering.length - 2]
-      const D = ordering[ordering.length - 1]
+          // If they're next to each other, it's a special case
+          if (e === b + 1) {
+            const A = currentOrdering[b - 1]
+            const B = currentOrdering[b]
+            const C = currentOrdering[e]
+            const D = currentOrdering[e + 1]
 
-      // A B ... C D
-      // B ... C D A
-      // destroys the AB link, adds the DA link
+            current = d(A, n, B, n) + d(B, n, C, n) + d(C, n, D, n)
+            flipB = d(A, n, B, f) + d(B, f, C, n) + d(C, n, D, n)
+            flipE = d(A, n, B, n) + d(B, n, C, f) + d(C, f, D, n)
+            flipBE = d(A, n, B, f) + d(B, f, C, f) + d(C, f, D, n)
+            swapBE = d(A, n, C, n) + d(C, n, B, n) + d(B, n, D, n)
+            flipBSwapBE = d(A, n, C, n) + d(C, n, B, f) + d(B, f, D, n)
+            flipESwapBE = d(A, n, C, f) + d(C, f, B, n) + d(B, n, D, n)
+            flipBESwapBE = d(A, n, C, f) + d(C, f, B, f) + d(B, f, D, n)
+          } else {
+            // The segments are not overlapping
+            const A = currentOrdering[b - 1]
+            const B = currentOrdering[b]
+            const C = currentOrdering[b + 1]
+            const D = currentOrdering[e - 1]
+            const E = currentOrdering[e]
+            const F = currentOrdering[e + 1]
 
-      const dAnBn = d(A, n, B, n)
-      const dDnAn = d(D, n, A, n)
-
-      if (dDnAn < dAnBn) {
-        ordering.push(ordering.shift()!)
-
-        const delta = dAnBn - dDnAn
-
-        cost = cost - delta
-        improved = true
-      }
-    }
-    {
-      // Test a right rotation
-      const A = ordering[0]
-      const B = ordering[1]
-      const C = ordering[ordering.length - 2]
-      const D = ordering[ordering.length - 1]
-
-      // A B ... C D
-      // D A B ... C
-      // destroys the CD link, adds the DA link
-
-      const dCnDn = d(C, n, D, n)
-      const dDnAn = d(D, n, A, n)
-
-      if (dDnAn < dCnDn) {
-        ordering.unshift(ordering.pop()!)
-
-        const delta = dCnDn - dDnAn
-
-        cost = cost - delta
-        improved = true
-      }
-    }
-    {
-      // TODO: Test a flip
-    }
-
-    // Start and end points are fixed with this algorithm
-    iteration: for (let b = 1; b < ordering.length - 2; b++) {
-      for (let e = b + 1; e < ordering.length - 1; e++) {
-        // If they're next to each other, it's a special case
-        if (e === b + 1) {
-          const A = ordering[b - 1]
-          const B = ordering[b]
-          const C = ordering[e]
-          const D = ordering[e + 1]
-
-          const current = d(A, n, B, n) + d(B, n, C, n) + d(C, n, D, n)
-          const flipB = d(A, n, B, f) + d(B, f, C, n) + d(C, n, D, n)
-          const flipC = d(A, n, B, n) + d(B, n, C, f) + d(C, f, D, n)
-          const flipBC = d(A, n, B, f) + d(B, f, C, f) + d(C, f, D, n)
-          const swapBC = d(A, n, C, n) + d(C, n, B, n) + d(B, n, D, n)
-          const flipBSwapBC = d(A, n, C, n) + d(C, n, B, f) + d(B, f, D, n)
-          const flipCSwapBC = d(A, n, C, f) + d(C, f, B, n) + d(B, n, D, n)
-          const flipBCSwapBC = d(A, n, C, f) + d(C, f, B, f) + d(B, f, D, n)
+            // Calculate the distances of the different segments, flipped or swapped
+            current = d(A, n, B, n) + d(B, n, C, n) + d(D, n, E, n) + d(E, n, F, n) // prettier-ignore
+            flipB = d(A, n, B, f) + d(B, f, C, n) + d(D, n, E, n) + d(E, n, F, n) // prettier-ignore
+            flipE = d(A, n, B, n) + d(B, n, C, n) + d(D, n, E, f) + d(E, f, F, n) // prettier-ignore
+            flipBE = d(A, n, B, f) + d(B, f, C, n) + d(D, n, E, f) + d(E, f, F, n) // prettier-ignore
+            swapBE = d(A, n, E, n) + d(E, n, C, n) + d(D, n, B, n) + d(B, n, F, n) // prettier-ignore
+            flipBSwapBE = d(A, n, E, n) + d(E, n, C, n) + d(D, n, B, f) + d(B, f, F, n) // prettier-ignore
+            flipESwapBE = d(A, n, E, f) + d(E, f, C, n) + d(D, n, B, n) + d(B, n, F, n) // prettier-ignore
+            flipBESwapBE = d(A, n, E, f) + d(E, f, C, n) + d(D, n, B, f) + d(B, f, F, n) // prettier-ignore
+          }
 
           // Find the winner
           const smallest = Math.min(
             current,
             flipB,
-            flipC,
-            flipBC,
-            swapBC,
-            flipBSwapBC,
-            flipCSwapBC,
-            flipBCSwapBC,
+            flipE,
+            flipBE,
+            swapBE,
+            flipBSwapBE,
+            flipESwapBE,
+            flipBESwapBE,
           )
 
           // update the cost
-          const delta = current - smallest
-          cost = cost - delta
+          if (smallest !== current) {
+            improved = true
+            const delta = current - smallest
+            cost = cost - delta
 
-          // Do the operations of the winner
+            const copyToAlternates = { signal: false }
 
-          if (smallest === current) {
-            // No improvement
-          } else if (smallest === flipB) {
-            ordering[b].flip()
-            improved = true
-          } else if (smallest === flipC) {
-            ordering[e].flip()
-            improved = true
-          } else if (smallest === flipBC) {
-            ordering[b].flip()
-            ordering[e].flip()
-            improved = true
-          } else if (smallest === swapBC) {
-            swap(ordering, b, e)
-            improved = true
-          } else if (smallest === flipBSwapBC) {
-            ordering[b].flip()
-            swap(ordering, b, e)
-            improved = true
-          } else if (smallest === flipCSwapBC) {
-            ordering[e].flip()
-            swap(ordering, b, e)
-            improved = true
-          } else if (smallest === flipBCSwapBC) {
-            ordering[b].flip()
-            ordering[e].flip()
-            swap(ordering, b, e)
-            improved = true
+            if (smallest === flipB) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, true, false, false, createHasher) // prettier-ignore
+            }
+            if (smallest === flipE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, false, true, false, createHasher) // prettier-ignore
+            }
+            if (smallest === flipBE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, true, true, false, createHasher) // prettier-ignore
+            }
+            if (smallest === swapBE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, false, false, true, createHasher) // prettier-ignore
+            }
+            if (smallest === flipBSwapBE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, true, false, true, createHasher) // prettier-ignore
+            }
+            if (smallest === flipESwapBE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, false, true, true, createHasher) // prettier-ignore
+            }
+            if (smallest === flipBESwapBE) {
+              applyOperations(currentOrdering, copyToAlternates, queue, enqueued, b, e, true, true, true, createHasher) // prettier-ignore
+            }
           }
-
-          continue
-        }
-
-        // The segments are not overlapping
-        const A = ordering[b - 1]
-        const B = ordering[b]
-        const C = ordering[b + 1]
-        const D = ordering[e - 1]
-        const E = ordering[e]
-        const F = ordering[e + 1]
-
-        // Calculate the distances of the different segments, flipped or swapped
-        const current = d(A, n, B, n) + d(B, n, C, n) + d(D, n, E, n) + d(E, n, F, n) // prettier-ignore
-        const flipB = d(A, n, B, f) + d(B, f, C, n) + d(D, n, E, n) + d(E, n, F, n) // prettier-ignore
-        const flipE = d(A, n, B, n) + d(B, n, C, n) + d(D, n, E, f) + d(E, f, F, n) // prettier-ignore
-        const flipBE = d(A, n, B, f) + d(B, f, C, n) + d(D, n, E, f) + d(E, f, F, n) // prettier-ignore
-        const swapBE = d(A, n, E, n) + d(E, n, C, n) + d(D, n, B, n) + d(B, n, F, n) // prettier-ignore
-        const flipBSwapBE = d(A, n, E, n) + d(E, n, C, n) + d(D, n, B, f) + d(B, f, F, n) // prettier-ignore
-        const flipESwapBE = d(A, n, E, f) + d(E, f, C, n) + d(D, n, B, n) + d(B, n, F, n) // prettier-ignore
-        const flipBESwapBE = d(A, n, E, f) + d(E, f, C, n) + d(D, n, B, f) + d(B, f, F, n) // prettier-ignore
-
-        // Find the winner
-        const smallest = Math.min(
-          current,
-          flipB,
-          flipE,
-          flipBE,
-          swapBE,
-          flipBSwapBE,
-          flipESwapBE,
-          flipBESwapBE,
-        )
-
-        // update the cost
-        const delta = current - smallest
-        cost = cost - delta
-
-        // Do the operations of the winner
-        if (smallest === current) {
-          // No improvement
-        } else if (smallest === flipB) {
-          ordering[b].flip()
-          improved = true
-        } else if (smallest === flipE) {
-          ordering[e].flip()
-          improved = true
-        } else if (smallest === flipBE) {
-          ordering[b].flip()
-          ordering[e].flip()
-          improved = true
-        } else if (smallest === swapBE) {
-          swap(ordering, b, e)
-          improved = true
-        } else if (smallest === flipBSwapBE) {
-          ordering[b].flip()
-          swap(ordering, b, e)
-          improved = true
-        } else if (smallest === flipESwapBE) {
-          ordering[e].flip()
-          swap(ordering, b, e)
-          improved = true
-        } else if (smallest === flipBESwapBE) {
-          ordering[b].flip()
-          ordering[e].flip()
-          swap(ordering, b, e)
-          improved = true
-        }
-
-        if (cost < 0) {
-          throw new Error(`TSP score went < 0`)
         }
       }
+
+      // Final optimisation passes to rotate the tour
+      {
+        // Test for all rotations, removing the longest link if possible
+        let longestLinkIndex = 0
+        let longestLinkDistance = 0
+
+        for (let index = 0; index < currentOrdering.length; index++) {
+          const prev = currentOrdering[index]
+          const current = currentOrdering[(index + 1) % currentOrdering.length]
+          const distance = prev.getEnd().distanceTo(current.getStart())
+
+          if (distance > longestLinkDistance) {
+            longestLinkIndex = index
+            longestLinkDistance = distance
+          }
+        }
+
+        if (longestLinkIndex !== currentOrdering.length - 1) {
+          const left = currentOrdering.slice(0, longestLinkIndex + 1)
+          const right = currentOrdering.slice(longestLinkIndex + 1)
+
+          // Reorder the arrays to remove the longest link
+          currentOrdering = right.concat(left)
+          const newLink = right[right.length - 1]
+            .getEnd()
+            .distanceTo(left[0].getStart())
+          cost = cost - longestLinkDistance + newLink
+        }
+      }
+      // The main iteration loop can't flip or swap the ends, so do that up here
+      {
+        // Test flipping the start
+        const A = currentOrdering[0]
+        const B = currentOrdering[1]
+
+        const dAnB = A.getEnd().distanceTo(B.getStart())
+        const dAfB = A.getStart().distanceTo(B.getStart())
+
+        if (dAfB < dAnB) {
+          A.flip()
+          console.log(`flipping start`)
+
+          const delta = dAnB - dAfB
+
+          cost = cost - delta
+          improved = true
+        }
+      }
+      {
+        // Test flipping the end
+        const E = currentOrdering[currentOrdering.length - 2]
+        const F = currentOrdering[currentOrdering.length - 1]
+
+        const dEFn = E.getEnd().distanceTo(F.getStart())
+        const dEFf = E.getEnd().distanceTo(F.getEnd())
+
+        if (dEFf < dEFn) {
+          F.flip()
+          console.log(`flipping end`)
+
+          const delta = dEFn - dEFf
+
+          cost = cost - delta
+          improved = true
+        }
+      }
+      {
+        // TODO: Test a flip
+      }
+    }
+
+    if (cost < best.cost) {
+      // If we have a new best tour, set it
+      best.tour = currentOrdering
+      best.hash = hash
+      best.cost = cost
     }
   }
 
-  return { ordering, iteration, completed: true, time: Date.now() - start }
+  return {
+    iterations: tourIndex + 1,
+    completed: true,
+    time: Date.now() - start,
+  }
 }
 
 /**
@@ -620,10 +804,10 @@ export async function optimise(
   // Setup our ordering cache
   const nextOrderingCache: OrderingCache = {}
 
-  const populateOrderingCache = () => {
+  const populateOrderingCache = (movements: Movement[]) => {
     // Store the final order for passing to the next frame
-    for (let index = 0; index < sparseBag.length; index++) {
-      const movement = sparseBag[index]
+    for (let index = 0; index < movements.length; index++) {
+      const movement = movements[index]
       nextOrderingCache[movement.interFrameID] = index
     }
 
@@ -644,7 +828,7 @@ export async function optimise(
     await updateProgress({
       duration: getTotalDuration(currentDense),
       text: `Optimised to ${Math.round(curentDuration * 100) / 100}ms`,
-      orderingCache: populateOrderingCache(),
+      orderingCache: populateOrderingCache(beamSearched),
       completed: true,
       minimaFound: false,
       timeSpent: Date.now() - startedOptimisation,
@@ -655,35 +839,113 @@ export async function optimise(
     return
   }
 
-  let ordering = sparseBag
+  const { create32: createHasher } = await xxhash()
+
+  let movements = optimiseBySearch(sparseBag)
+
+  const best = {
+    tour: movements,
+    hash: hashTour(movements, createHasher),
+    cost: sparseToCost(movements),
+  }
+
+  const OPTIMISATION_TIME = 5000
 
   let iterations = 0
 
+  // If we have less than 12 movements (probably 15s), do a brute force solve
+  if (movements.length < 12) {
+    const permutor = new Permutor(movements)
+
+    while (true) {
+      // Do 5 seconds of optimisation at a time, then check in to see if we should cancel
+      const nextPass = optimiseBruteForce(
+        permutor,
+        best,
+        createHasher,
+        OPTIMISATION_TIME,
+      )
+
+      iterations += nextPass.iterations
+
+      const currentDense = sparseToDense(best.tour, settings)
+      const currentDuration = getTotalDuration(currentDense)
+
+      // Finish within the time it takes to _do_ the frame no matter what
+      let done =
+        nextPass.completed || Date.now() - startedOptimisation > currentDuration
+
+      const shouldContinue = await updateProgress({
+        duration: getTotalDuration(currentDense),
+        text: `Optimised to ${Math.round(currentDuration * 100) / 100}ms`,
+        orderingCache: populateOrderingCache(best.tour),
+        completed: done,
+        minimaFound: done,
+        timeSpent: Date.now() - startedOptimisation,
+        startingCost,
+        currentCost: sparseToCost(sparseBag),
+      })
+
+      // console.log(
+      //   `iterations: ${iterations}, currentDuration: ${currentDuration}, time: ${
+      //     (Date.now() - startedOptimisation) / 1000
+      //   }s`,
+      // )
+
+      // If we've reached a minima, or should stop, or we've taken longer than the length of the tour to optimise, exit
+      if (done || !shouldContinue) {
+        return
+      }
+    }
+  }
+
+  // The alternate candidates list
+  const queue: Map<number, Movement[]> = new Map()
+  const enqueued: Set<number> = new Set()
+
+  // Add the initial tour
+  queue.set(best.hash, best.tour)
+  enqueued.add(best.hash)
+
   // Otherwise do a 2opt
   while (true) {
-    // Do one second of optimisation at a time, then check in to see if we should cancel
-    const nextPass = optimise2Opt(ordering, 1000)
+    // Do 5 seconds of optimisation at a time, then check in to see if we should cancel
+    const nextPass = optimise2Opt(
+      queue,
+      enqueued,
+      best,
+      createHasher,
+      OPTIMISATION_TIME,
+    )
 
-    iterations += nextPass.iteration
+    iterations += nextPass.iterations
 
-    const currentDense = sparseToDense(nextPass.ordering, settings)
-    const curentDuration = getTotalDuration(currentDense)
+    const currentDense = sparseToDense(best.tour, settings)
+    const currentDuration = getTotalDuration(currentDense)
+
+    // Finish within the time it takes to _do_ the frame no matter what
+    let done =
+      nextPass.completed || Date.now() - startedOptimisation > currentDuration
 
     const shouldContinue = await updateProgress({
       duration: getTotalDuration(currentDense),
-      text: `Optimised to ${Math.round(curentDuration * 100) / 100}ms`,
-      orderingCache: populateOrderingCache(),
-      completed: nextPass.completed,
-      minimaFound: nextPass.completed,
+      text: `Optimised to ${Math.round(currentDuration * 100) / 100}ms`,
+      orderingCache: populateOrderingCache(best.tour),
+      completed: done,
+      minimaFound: done,
       timeSpent: Date.now() - startedOptimisation,
       startingCost,
       currentCost: sparseToCost(sparseBag),
     })
 
-    ordering = nextPass.ordering
+    // console.log(
+    //   `iterations: ${iterations}, currentDuration: ${currentDuration}, time: ${
+    //     (Date.now() - startedOptimisation) / 1000
+    //   }s`,
+    // )
 
-    // If we've reached a minima, or should stop, exit
-    if (nextPass.completed || !shouldContinue) {
+    // If we've reached a minima, or should stop, or we've taken longer than the length of the tour to optimise, exit
+    if (done || !shouldContinue) {
       return
     }
   }

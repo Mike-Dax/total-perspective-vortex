@@ -25,6 +25,27 @@ import {
   useSetting,
 } from './state'
 
+function DisableShapedTransitionsControl() {
+  const [allowed, setAllow] = useState(
+    getSetting(state => state.settings.optimisation.disableShapedTransitions),
+  )
+
+  const updateAllowed = useCallback(allowed => {
+    setSetting(state => {
+      state.settings.optimisation.disableShapedTransitions = allowed
+    })
+  }, [])
+
+  const setAndUpdateAngle: React.FormEventHandler<HTMLInputElement> =
+    useCallback(event => {
+      const checked = (event.target as HTMLInputElement).checked
+      setAllow(checked)
+      updateAllowed(checked)
+    }, [])
+
+  return <Checkbox checked={allowed} onChange={setAndUpdateAngle} />
+}
+
 function InterLineTransitionEnabledControl() {
   const [allowed, setAllow] = useState(
     getSetting(state => state.settings.optimisation.smoothInterlineTransitions),
@@ -103,6 +124,36 @@ function InterLineTransitionDistanceControl() {
       value={distange}
       onValueChange={setAndUpdateDistance}
       rightElement={<Tag>mm</Tag>}
+      style={{ width: '100%' }}
+    />
+  )
+}
+
+function LineRunUpDistanceControl() {
+  const [distange, setDistance] = useState(
+    getSetting(state => state.settings.optimisation.lineRunUp) * 100,
+  )
+
+  const updateDistance = useCallback(distance => {
+    setSetting(state => {
+      state.settings.optimisation.lineRunUp = distance
+    })
+  }, [])
+
+  const setAndUpdateDistance = useCallback(distance => {
+    setDistance(distance)
+    updateDistance(distance / 100)
+  }, [])
+
+  return (
+    <NumericInput
+      fill
+      min={0}
+      max={100}
+      stepSize={1}
+      value={distange}
+      onValueChange={setAndUpdateDistance}
+      rightElement={<Tag>%</Tag>}
       style={{ width: '100%' }}
     />
   )
@@ -646,6 +697,7 @@ function GeneralTab() {
       Max Speed <MaxSpeedControl />
       Max Transition <TransitionMaxSpeedControl />
       Wait before Start <WaitAtStartDurationControl />
+      Disable Shaped Transitions <DisableShapedTransitionsControl />
     </Composition>
   )
 }
@@ -707,6 +759,7 @@ function LineTab() {
           Inter-line Transition Distance <InterLineTransitionDistanceControl />
         </>
       ) : null}
+      Line run up <LineRunUpDistanceControl />
     </Composition>
   )
 }

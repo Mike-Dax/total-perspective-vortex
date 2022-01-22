@@ -21,7 +21,7 @@ import { TreeNodeInfo } from '@blueprintjs/core'
 import { NodeID, NodeInfo } from './RenderableTree'
 import type { FRAME_STATE, ToolpathGenerator } from './../optimiser/main'
 
-const defaultSettings: Settings = {
+export const defaultSettings: Settings = {
   objectSettings: {
     gpencil: {
       breakUpStrokes: false,
@@ -57,6 +57,8 @@ const defaultSettings: Settings = {
     interLineTransitionAngle: 50,
     interLineTransitionShaveDistance: 5,
     smoothInterlineTransitions: false,
+    lineRunUp: 0,
+    disableShapedTransitions: false,
   },
 }
 
