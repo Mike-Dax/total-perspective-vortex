@@ -96,8 +96,6 @@ export class RandomColorMaterial extends Material {
   }
 
   public generateLightpath = (movement: Movement) => {
-    this.color = pickColor()
-
     const fade: PlannerLightMove = {
       duration: movement.getDuration(),
       type: LightMoveType.IMMEDIATE,
@@ -119,8 +117,6 @@ export class RandomColorMaterial extends Material {
     fromT: number,
     toT: number,
   ) => {
-    this.color = pickColor()
-
     // Annotate draw order
     annotateDrawOrder(
       movementIndex,

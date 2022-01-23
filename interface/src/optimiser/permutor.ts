@@ -20,7 +20,11 @@
  * LIABILITY, WHETHER IN AN ACTION OF CONTRACT, TORT OR OTHERWISE, ARISING FROM,
  * OUT OF OR IN CONNECTION WITH THE SOFTWARE OR THE USE OR OTHER DEALINGS IN THE
  * SOFTWARE.
+ *
+ * Modified to be lazily instantiated, rewritten in Typescript
  */
+
+import { Movement } from './movements'
 
 interface StackFrame {
   n: number
@@ -36,14 +40,15 @@ function factorial(num: number) {
   return result
 }
 
-export class Permutor<T> {
+export class Permutor {
   private maxIterations: number
   private iterations: number = 0
-  private x: T[]
+  private x: Movement[]
   private n: number
   private stack: StackFrame[] = []
+  private initialised = false
 
-  constructor(arr: T[]) {
+  constructor(arr: Movement[]) {
     this.x = arr
     this.n = arr.length
     this.maxIterations = factorial(arr.length)
