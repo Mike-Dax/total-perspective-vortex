@@ -72,6 +72,16 @@ def serialise_position(vec: list[float], context, obj):
         serialise_float(world_coordinate.z / scale_length),
     ]
 
+def serialise_camera_position(world_coordinate: list[float], context, obj):
+    # This scale is manually defined
+    scale_length = SCALE_DIVISOR # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
+
+    return [
+        serialise_float(world_coordinate.x / scale_length),
+        serialise_float(world_coordinate.y / scale_length),
+        serialise_float(world_coordinate.z / scale_length),
+    ]
+
 # Up to 6 decimals of precision
 def serialise_float(f: float):
     return round(f, 6)
@@ -79,6 +89,21 @@ def serialise_float(f: float):
 
 def slugify(name: str):
     return re.sub(r'[\W_]+', '_', name.lower())
+
+
+def override_custom_material_properties(struct: dict, obj: bpy.types.bpy_struct):
+    for key, value in obj.items():
+        if isinstance(key, str) and key.startswith("material_"):
+            material_key = key[len("material_"):]
+
+            has_to_list = getattr(value, "to_list", None)
+
+            if callable(has_to_list):
+                struct["material"][material_key] = value.to_list()
+            else:
+                struct["material"][material_key] = value
+
+            print("found custom material key", material_key, struct["material"][material_key])
 
 
 def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct):
@@ -103,6 +128,9 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
             "material": serialise_material_simple_emission(col),
             "strokes": [],
         })
+
+        override_custom_material_properties(layer_struct, gp_obj.data)
+
         save_struct["layers"].append(layer_struct)
 
         layer_name = slugify(layer.info)
@@ -221,6 +249,7 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
             "material": serialise_material(settings.material_slot),
             "particles": [],
         })
+
         save_struct["systems"].append(system_struct)
 
         system_name = slugify(ps.name)
@@ -259,7 +288,7 @@ def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
         "focal_length": cm_obj.data.lens,
         "sensor_height": sensor_height,
         "sensor_width": sensor_width,
-        "position": serialise_position(cm_obj.location, context, cm_obj),
+        "position": serialise_camera_position(cm_obj.location, context, cm_obj),
         "rotation": serialise_vector(cm_obj.rotation_euler),
         "near": serialise_float(cm_obj.data.clip_start / SCALE_DIVISOR),
         "far": serialise_float(cm_obj.data.clip_end / SCALE_DIVISOR),
@@ -283,6 +312,8 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
         }),
         "position": serialise_position(evaluated_light.location, context, evaluated_light),
     })
+
+    override_custom_material_properties(save_struct, li_obj.data)
 
     save_file(get_output_filepath(context, frame_number, li_obj.name), save_struct)
 
