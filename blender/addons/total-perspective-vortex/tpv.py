@@ -318,6 +318,34 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
     save_file(get_output_filepath(context, frame_number, li_obj.name), save_struct)
 
 
+def empty_export(self, context, frame_number: int, em_obj: bpy.types.bpy_struct):
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_light = em_obj.evaluated_get(deps_graph)
+
+    save_struct = dict({
+        "type": "empty",
+        "frame": frame_number,
+        "name": evaluated_light.name,
+        "data": dict({}),
+    })
+
+    for key, value in em_obj.items():
+        if isinstance(key, str) and key.startswith("frame_"):
+            frame_key = key[len("frame_"):]
+
+            has_to_list = getattr(value, "to_list", None)
+
+            if callable(has_to_list):
+                save_struct["data"][frame_key] = value.to_list()
+            else:
+                save_struct["data"][frame_key] = value
+
+            print("found custom frame key", frame_key, save_struct["data"][frame_key])
+
+    save_file(get_output_filepath(context, frame_number, em_obj.name), save_struct)
+
+
 def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
     # Grab the evaluated dependency graph
     deps_graph = context.evaluated_depsgraph_get()
@@ -421,6 +449,10 @@ class OBJECT_OT_TPVExport(Operator):
 
                 if selObj.type == "CURVE":
                     curve_export(self, bpy.context, frame_number, selObj)
+                    continue
+
+                if selObj.type == "EMPTY":
+                    empty_export(self, bpy.context, frame_number, selObj)
                     continue
 
                 print("Unknown object type selected:", selObj.type)
