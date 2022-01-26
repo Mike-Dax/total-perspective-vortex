@@ -72,7 +72,7 @@ def serialise_position(vec: list[float], context, obj):
         serialise_float(world_coordinate.z / scale_length),
     ]
 
-def serialise_camera_position(world_coordinate: list[float], context, obj):
+def serialise_position_no_world_multiply(world_coordinate: list[float], context, obj):
     # This scale is manually defined
     scale_length = SCALE_DIVISOR # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
 
@@ -89,21 +89,6 @@ def serialise_float(f: float):
 
 def slugify(name: str):
     return re.sub(r'[\W_]+', '_', name.lower())
-
-
-def override_custom_material_properties(struct: dict, obj: bpy.types.bpy_struct):
-    for key, value in obj.items():
-        if isinstance(key, str) and key.startswith("material_"):
-            material_key = key[len("material_"):]
-
-            has_to_list = getattr(value, "to_list", None)
-
-            if callable(has_to_list):
-                struct["material"][material_key] = value.to_list()
-            else:
-                struct["material"][material_key] = value
-
-            print("found custom material key", material_key, struct["material"][material_key])
 
 
 def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct):
@@ -129,7 +114,7 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
             "strokes": [],
         })
 
-        override_custom_material_properties(layer_struct, gp_obj.data)
+        dict_assign(layer_struct["material"], gp_obj.data, "material.")
 
         save_struct["layers"].append(layer_struct)
 
@@ -234,6 +219,8 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
     obj_name = slugify(pt_obj.name)
 
+    loc, rot, scale = pt_obj.matrix_world.decompose()
+
     material_slots = pt_obj.evaluated_get(deps_graph).material_slots
 
     for index, _ in enumerate(particle_systems):
@@ -264,7 +251,7 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
             particle_struct = dict({
                 "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
-                "location": serialise_position(particle.location - pt_obj.location, context, pt_obj),
+                "location": serialise_position(particle.location - loc, context, pt_obj),
                 "quaternion": serialise_quaternion(particle.rotation),
                 "velocity": serialise_vector(particle.velocity)
             })
@@ -281,6 +268,8 @@ def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
     sensor_height = cm_obj.data.sensor_height
     sensor_width = cm_obj.data.sensor_width
 
+    loc, rot, scale = cm_obj.matrix_world.decompose()
+
     save_struct = dict({
         "type": "camera",
         "frame": frame_number,
@@ -288,8 +277,8 @@ def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
         "focal_length": cm_obj.data.lens,
         "sensor_height": sensor_height,
         "sensor_width": sensor_width,
-        "position": serialise_camera_position(cm_obj.location, context, cm_obj),
-        "rotation": serialise_vector(cm_obj.rotation_euler),
+        "position": serialise_position_no_world_multiply(loc, context, cm_obj),
+        "quaternion": serialise_quaternion(rot),
         "near": serialise_float(cm_obj.data.clip_start / SCALE_DIVISOR),
         "far": serialise_float(cm_obj.data.clip_end / SCALE_DIVISOR),
     })
@@ -302,6 +291,8 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
     deps_graph = context.evaluated_depsgraph_get()
     evaluated_light = li_obj.evaluated_get(deps_graph)
 
+    loc, rot, scale = evaluated_light.matrix_world.decompose()
+
     save_struct = dict({
         "type": "light",
         "frame": frame_number,
@@ -310,10 +301,10 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
             "type": "color",
             "color": serialise_vector(evaluated_light.data.color)
         }),
-        "position": serialise_position(evaluated_light.location, context, evaluated_light),
+        "position": serialise_position_no_world_multiply(loc, context, evaluated_light),
     })
 
-    override_custom_material_properties(save_struct, li_obj.data)
+    dict_assign(save_struct["material"], li_obj.data, "material.")
 
     save_file(get_output_filepath(context, frame_number, li_obj.name), save_struct)
 
@@ -330,20 +321,49 @@ def empty_export(self, context, frame_number: int, em_obj: bpy.types.bpy_struct)
         "data": dict({}),
     })
 
-    for key, value in em_obj.items():
-        if isinstance(key, str) and key.startswith("frame_"):
-            frame_key = key[len("frame_"):]
-
-            has_to_list = getattr(value, "to_list", None)
-
-            if callable(has_to_list):
-                save_struct["data"][frame_key] = value.to_list()
-            else:
-                save_struct["data"][frame_key] = value
-
-            print("found custom frame key", frame_key, save_struct["data"][frame_key])
+    dict_assign(save_struct["data"], em_obj, "frame.")
 
     save_file(get_output_filepath(context, frame_number, em_obj.name), save_struct)
+
+
+def dict_assign(original, mutations, prefix):
+    """
+    Sort the mutation keys by length of the key, shortest to longest
+
+    This gives us a 'css-like' specificity guarantee
+    """
+
+    for sorted_key in sorted(mutations.keys(), key=lambda k: len(k)):
+        if sorted_key.startswith(prefix):
+            key_no_prefix = sorted_key[len(prefix):]
+            mutate_dict_with_path(original, key_no_prefix, convert_blender_value(mutations[sorted_key]))
+
+
+def convert_blender_value(value):
+    has_to_list = getattr(value, "to_list", None)
+    has_to_dict = getattr(value, "to_dict", None)
+
+    if callable(has_to_list):
+        return value.to_list()
+    elif callable(has_to_dict):
+        return value.to_dict()
+    else:
+        return value
+
+
+def mutate_dict_with_path(d, path_str, val):
+    """
+    Decompose a path string with a value into a mutation of a dict
+    """
+    path = path_str.split(".")
+
+    key = path[0]
+    d[key] = val \
+        if len(path) == 1 \
+        else mutate_dict_with_path(d[key] if key in d else {},
+                        path[1:],
+                        val)
+    return d
 
 
 def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
