@@ -8,7 +8,9 @@ import mathutils
 import re
 
 from bpy.types import Operator
-
+from mathutils.bvhtree import BVHTree
+from typing import TypedDict
+from mathutils import Vector
 
 class TPVExportLayout(bpy.types.Panel):
     bl_label = "Total Perspective Vortex"
@@ -19,7 +21,11 @@ class TPVExportLayout(bpy.types.Panel):
 
     def draw(self, context):
         layout = self.layout
+        # Bake lighting
+        row = layout.row(align=True)
+        row.operator("object.gpbakelighting", icon="EXPORT")
 
+        # Export
         row = layout.row(align=True)
         row.prop(context.scene, 'export_pathStatic', icon="MESH_CUBE")
         row = layout.row(align=True)
@@ -486,3 +492,169 @@ class OBJECT_OT_TPVExport(Operator):
         bpy.context.scene.frame_set(saveFrame)
 
         return {'FINISHED'}
+
+class LightData(TypedDict):
+    world_position: list[float]
+    color: list[float]
+
+
+class OBJECT_OT_GPBakeLighting(Operator):
+    bl_idname = "object.gpbakelighting"
+    bl_label = "Bake GreasePencil Vertex Lighting"
+    bl_options = {'REGISTER', 'UNDO'}
+
+    def execute(self, context):
+        # get object in selection, for each, set active and selection
+        selObjs = bpy.context.selected_objects
+
+        # Remember what frame we're on
+        saveFrame = bpy.context.scene.frame_current
+
+        # Deselect everything
+        for selObj in selObjs:
+            selObj.select_set(False)
+
+        # For every frame, save every object
+        start_frame = bpy.context.scene.frame_start
+        end_frame = bpy.context.scene.frame_end
+
+        for frame_number in range(start_frame, end_frame):
+            # Update the progress bar
+            print(
+                "Baking GPencil light on frame {frame_number} in range ({start_frame}-{end_frame})".format(frame_number=frame_number,
+                                                                                              start_frame=start_frame,
+                                                                                              end_frame=end_frame))
+
+            # Set the frame in the editor
+            bpy.context.scene.frame_set(frame_number)
+
+            deps_graph = context.evaluated_depsgraph_get()
+
+            # Accumulate lights
+            lights: list[bpy.types.Light] = []
+            for selObj in selObjs:
+                if selObj.type == "LIGHT":
+                    # Evaluate the world position and current colour of the light
+                    evaluated_light = selObj.evaluated_get(deps_graph)
+                    loc, rot, scale = evaluated_light.matrix_world.decompose()
+                    light_color = evaluated_light.data.color
+
+                    lights.append(dict({
+                        "world_position": loc,
+                        "color": light_color
+                    }))
+                    # print("Light has position", loc, "and color", light_color)
+                    continue
+
+            meshes: list[BVHTree] = []
+            # Accumulate BVHTrees per mesh
+            for selObj in selObjs:
+                if selObj.type == "MESH":
+                    # bvhtree = BVHTree.FromObject(selObj, deps_graph)
+                    # meshes.append(bvhtree)
+                    meshes.append(selObj)
+                    continue
+
+            if len(meshes) == 0:
+                print("No meshes selected?")
+
+            # Bake each GPencil object
+            for selObj in selObjs:
+                bpy.ops.object.select_all(action='DESELECT')
+                selObj.select_set(True)
+                bpy.context.view_layer.objects.active = selObj
+
+                if selObj.type == "GPENCIL":
+                    grease_pencil_bake_lighting(self, bpy.context, frame_number, selObj, lights, meshes)
+                    continue
+
+
+        # Reset the frame that was selected
+        bpy.context.scene.frame_set(saveFrame)
+
+        return {'FINISHED'}
+
+
+def grease_pencil_bake_lighting(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct, lights: list[LightData], meshes: list[BVHTree]):
+    gp_layers = gp_obj.data.layers
+
+    obj_name = slugify(gp_obj.name)
+
+    for layer in gp_layers:
+        layer: bpy.types.GPencilLayer
+
+        col: mathutils.Color = layer.color
+
+        layer_name = slugify(layer.info)
+
+        for frame in layer.frames:
+            frame: bpy.types.GPencilFrame
+
+            # Only do this frame
+            if frame.frame_number != frame_number:
+                continue
+
+            for stroke in frame.strokes:
+                # A stroke is a collection of points, between which lines may be drawn
+                stroke: bpy.types.GPencilStroke
+
+                points: bpy.types.GPencilStrokePoints = stroke.points
+
+                for point in points:
+
+                    point: bpy.types.GPencilStrokePoint
+
+                    point_world_position: Vector = gp_obj.matrix_world @ point.co  # Multiply by the world matrix
+
+                    visible_light_count = 0
+                    acc_r = 0
+                    acc_g = 0
+                    acc_b = 0
+
+                    # For every light
+                    for light in lights:
+                        world_position = light["world_position"]
+                        light_color = light["color"]
+
+                        # Raycast from the point to the light, accumulate light information if it hits nothing
+                        hit_nothing = True
+
+                        starting_point: Vector = point_world_position # The point on the grease pencil
+                        ending_point: Vector = world_position # The light
+                        direction = (ending_point - starting_point).normalized() #
+                        distance = (ending_point - starting_point).length
+
+                        for mesh in meshes:
+                            #  ray_cast(co, direction, distance=sys.float_info.max): (Vector location, Vector normal, int index, float distance)
+                            cast_res = mesh.ray_cast(starting_point, direction, distance=distance)
+
+                            if not cast_res[0]:
+                                # nothing there
+                                pass
+                            else:
+                                # something there
+                                hit_nothing = False
+                                print("omg a hit",cast_res )
+                                break
+
+                        # If it hit nothing, accumulate this light
+                        if hit_nothing:
+                            acc_r += light_color[0]
+                            acc_g += light_color[1]
+                            acc_b += light_color[2]
+                            visible_light_count += 1
+
+                        pass
+
+                    if visible_light_count == 0:
+                        point.vertex_color[0] = 0
+                        point.vertex_color[1] = 0
+                        point.vertex_color[2] = 0
+                        point.vertex_color[3] = 0
+                    else:
+                        point.vertex_color[0] = acc_r / visible_light_count  # r
+                        point.vertex_color[1] = acc_g / visible_light_count # g
+                        point.vertex_color[2] = acc_b / visible_light_count # b
+                        point.vertex_color[3] = 1 # a
+
+                    # print(point, world_position, point.vertex_color)

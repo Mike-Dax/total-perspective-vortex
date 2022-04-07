@@ -24,6 +24,7 @@ def register():
 
     bpy.utils.register_class(tpv.TPVExportLayout)
     bpy.utils.register_class(tpv.OBJECT_OT_TPVExport)
+    bpy.utils.register_class(tpv.OBJECT_OT_GPBakeLighting)
     bpy.types.Scene.export_pathStatic = bpy.props.StringProperty(
         name="Folder",
         default="",
@@ -35,8 +36,9 @@ def register():
 
 def unregister():
     print("tpv unregister")
-    bpy.utils.unregister_class(tpv.OBJECT_OT_TPVExport)
     bpy.utils.unregister_class(tpv.TPVExportLayout)
+    bpy.utils.unregister_class(tpv.OBJECT_OT_TPVExport)
+    bpy.utils.unregister_class(tpv.OBJECT_OT_GPBakeLighting)
     del bpy.types.Scene.export_pathStatic
 
 
