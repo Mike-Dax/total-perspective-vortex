@@ -525,13 +525,14 @@ class OBJECT_OT_GPBakeLighting(Operator):
                                                                                               start_frame=start_frame,
                                                                                               end_frame=end_frame))
 
+
             # Set the frame in the editor
             bpy.context.scene.frame_set(frame_number)
 
             deps_graph = context.evaluated_depsgraph_get()
 
             # Accumulate lights
-            lights: list[bpy.types.Light] = []
+            lights = []
             for selObj in selObjs:
                 if selObj.type == "LIGHT":
                     # Evaluate the world position and current colour of the light
@@ -541,22 +542,11 @@ class OBJECT_OT_GPBakeLighting(Operator):
 
                     lights.append(dict({
                         "world_position": loc,
-                        "color": light_color
+                        "color": light_color,
+                        "radius": evaluated_light.data.shadow_soft_size
                     }))
                     # print("Light has position", loc, "and color", light_color)
                     continue
-
-            meshes: list[BVHTree] = []
-            # Accumulate BVHTrees per mesh
-            for selObj in selObjs:
-                if selObj.type == "MESH":
-                    # bvhtree = BVHTree.FromObject(selObj, deps_graph)
-                    # meshes.append(bvhtree)
-                    meshes.append(selObj)
-                    continue
-
-            if len(meshes) == 0:
-                print("No meshes selected?")
 
             # Bake each GPencil object
             for selObj in selObjs:
@@ -565,7 +555,7 @@ class OBJECT_OT_GPBakeLighting(Operator):
                 bpy.context.view_layer.objects.active = selObj
 
                 if selObj.type == "GPENCIL":
-                    grease_pencil_bake_lighting(self, bpy.context, frame_number, selObj, lights, meshes)
+                    grease_pencil_bake_lighting(self, bpy.context, frame_number, selObj, lights)
                     continue
 
 
@@ -575,10 +565,12 @@ class OBJECT_OT_GPBakeLighting(Operator):
         return {'FINISHED'}
 
 
-def grease_pencil_bake_lighting(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct, lights: list[LightData], meshes: list[BVHTree]):
+def grease_pencil_bake_lighting(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct, lights: list[LightData]):
     gp_layers = gp_obj.data.layers
 
     obj_name = slugify(gp_obj.name)
+
+    deps_graph = context.evaluated_depsgraph_get()
 
     for layer in gp_layers:
         layer: bpy.types.GPencilLayer
@@ -615,36 +607,35 @@ def grease_pencil_bake_lighting(self, context, frame_number: int, gp_obj: bpy.ty
                     for light in lights:
                         world_position = light["world_position"]
                         light_color = light["color"]
-
-                        # Raycast from the point to the light, accumulate light information if it hits nothing
-                        hit_nothing = True
+                        radius = light["radius"]
 
                         starting_point: Vector = point_world_position # The point on the grease pencil
                         ending_point: Vector = world_position # The light
-                        direction = (ending_point - starting_point).normalized() #
+
+                        direction = (ending_point - starting_point).normalized()  #
                         distance = (ending_point - starting_point).length
 
-                        for mesh in meshes:
-                            #  ray_cast(co, direction, distance=sys.float_info.max): (Vector location, Vector normal, int index, float distance)
-                            cast_res = mesh.ray_cast(starting_point, direction, distance=distance)
+                        # Move the starting point slightly along the line so we're not immediately intersecting ourselves
+                        starting_point = starting_point + (direction * (distance / 100))
 
-                            if not cast_res[0]:
-                                # nothing there
-                                pass
-                            else:
-                                # something there
-                                hit_nothing = False
-                                print("omg a hit",cast_res )
-                                break
+                        # recalculate the distance
+                        distance = (ending_point - starting_point).length
 
-                        # If it hit nothing, accumulate this light
-                        if hit_nothing:
+                        # Only try if the distance is below the radius of the light
+                        if distance > radius:
+                            continue
+
+                        # Scene raycasts seem to be the only ones that work
+                        result, location, normal, index, object, matrix = context.scene.ray_cast(deps_graph, starting_point, direction, distance=distance)
+
+                        # If we hit nothing, accumulate the light
+                        if not result:
                             acc_r += light_color[0]
                             acc_g += light_color[1]
                             acc_b += light_color[2]
                             visible_light_count += 1
-
-                        pass
+                        else:
+                            pass
 
                     if visible_light_count == 0:
                         point.vertex_color[0] = 0
