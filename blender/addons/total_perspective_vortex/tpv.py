@@ -229,6 +229,9 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
 
     material_slots = pt_obj.evaluated_get(deps_graph).material_slots
 
+    # Extract the camera details for occlusion culling
+    camera_location, camera_rot, camera_scale = bpy.context.scene.camera.matrix_world.decompose()
+
     for index, _ in enumerate(particle_systems):
         ps: bpy.types.ParticleSystem = particle_systems[index]
         settings: bpy.types.ParticleSettings = ps.settings
@@ -255,11 +258,22 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
             if particle.alive_state != "ALIVE": # enum in [‘DEAD’, ‘UNBORN’, ‘ALIVE’, ‘DYING’], default ‘DEAD’
                 continue
 
+            # Do a raycast at the camera to see if it's occluded
+            starting_point: Vector = particle.location - loc  # The particle
+            ending_point: Vector = camera_location  # The camera
+            direction = (ending_point - starting_point).normalized()
+            distance = (ending_point - starting_point).length
+
+            # Scene raycast
+            result, location, normal, index, object, matrix = context.scene.ray_cast(deps_graph, starting_point,
+                                                                                     direction, distance=distance)
+
             particle_struct = dict({
                 "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
                 "location": serialise_position(particle.location - loc, context, pt_obj),
                 "quaternion": serialise_quaternion(particle.rotation),
-                "velocity": serialise_vector(particle.velocity)
+                "velocity": serialise_vector(particle.velocity),
+                "occluded": True if result else False
             })
             system_struct["particles"].append(particle_struct)
 
