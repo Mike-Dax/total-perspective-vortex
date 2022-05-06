@@ -64,7 +64,7 @@ def serialise_quaternion(quat: mathutils.Quaternion):
     return [serialise_float(quat.x), serialise_float(quat.y), serialise_float(quat.z), serialise_float(quat.w)]
 
 
-SCALE_DIVISOR = 0.01
+SCALE_DIVISOR = 0.015 # 0.01
 
 def serialise_position(vec: list[float], context, obj):
     world_coordinate = obj.matrix_world @ vec  # Multiply by the world matrix
@@ -119,6 +119,12 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
             "material": serialise_material_simple_emission(col),
             "strokes": [],
         })
+
+        # If there's a real material, use that
+        if len(gp_obj.data.materials) > 0:
+            layer_struct["material"] = serialise_material(gp_obj.data.materials[gp_obj.active_material_index].name)
+
+        # Override the material if we have an override
 
         dict_assign(layer_struct["material"], gp_obj.data, "material.")
 
@@ -230,7 +236,7 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
     material_slots = pt_obj.evaluated_get(deps_graph).material_slots
 
     # Extract the camera details for occlusion culling
-    camera_location, camera_rot, camera_scale = bpy.context.scene.camera.matrix_world.decompose()
+    camera_location, camera_rot, camera_scale = context.scene.camera.matrix_world.decompose()
 
     for index, _ in enumerate(particle_systems):
         ps: bpy.types.ParticleSystem = particle_systems[index]
@@ -259,8 +265,9 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
                 continue
 
             # Do a raycast at the camera to see if it's occluded
-            starting_point: Vector = particle.location - loc  # The particle
-            ending_point: Vector = camera_location  # The camera
+            local_start: Vector = particle.location - loc
+            starting_point: Vector = camera_location  # The particle in world space
+            ending_point: Vector = pt_obj.matrix_world @ local_start  # The camera
             direction = (ending_point - starting_point).normalized()
             distance = (ending_point - starting_point).length
 
@@ -313,6 +320,19 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
 
     loc, rot, scale = evaluated_light.matrix_world.decompose()
 
+    # Extract the camera details for occlusion culling
+    camera_location, camera_rot, camera_scale = context.scene.camera.matrix_world.decompose()
+
+    # Do a raycast at the camera to see if it's occluded
+    starting_point: Vector = camera_location  # The particle in world space
+    ending_point: Vector = loc  # The camera
+    direction = (ending_point - starting_point).normalized()
+    distance = (ending_point - starting_point).length
+
+    # Scene raycast
+    result, location, normal, index, object, matrix = context.scene.ray_cast(deps_graph, starting_point,
+                                                                             direction, distance=distance)
+
     save_struct = dict({
         "type": "light",
         "frame": frame_number,
@@ -322,6 +342,7 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
             "color": serialise_vector(evaluated_light.data.color)
         }),
         "position": serialise_position_no_world_multiply(loc, context, evaluated_light),
+        "occluded": True if result else False
     })
 
     dict_assign(save_struct["material"], li_obj.data, "material.")
@@ -508,7 +529,7 @@ class OBJECT_OT_TPVExport(Operator):
         return {'FINISHED'}
 
 class LightData(TypedDict):
-    world_position: list[float]
+    world_position: Vector
     color: list[float]
 
 
@@ -532,13 +553,28 @@ class OBJECT_OT_GPBakeLighting(Operator):
         start_frame = bpy.context.scene.frame_start
         end_frame = bpy.context.scene.frame_end
 
+        light_count = 0
+        pencil_count = 0
+        for selObj in selObjs:
+            if selObj.type == "LIGHT":
+                light_count += 1
+            if selObj.type == "GPENCIL":
+                pencil_count += 1
+
+        if light_count == 0:
+            print("No lights")
+
+        if pencil_count == 0:
+            print("No GPencils")
+
+        print("{light_count} lights, {pencil_count} GPencils".format(light_count=light_count,pencil_count=pencil_count))
+
         for frame_number in range(start_frame, end_frame):
             # Update the progress bar
             print(
                 "Baking GPencil light on frame {frame_number} in range ({start_frame}-{end_frame})".format(frame_number=frame_number,
                                                                                               start_frame=start_frame,
                                                                                               end_frame=end_frame))
-
 
             # Set the frame in the editor
             bpy.context.scene.frame_set(frame_number)
@@ -559,7 +595,7 @@ class OBJECT_OT_GPBakeLighting(Operator):
                         "color": light_color,
                         "radius": evaluated_light.data.shadow_soft_size
                     }))
-                    # print("Light has position", loc, "and color", light_color)
+                    #print("Light has position", loc, "and color", light_color)
                     continue
 
             # Bake each GPencil object
@@ -661,5 +697,6 @@ def grease_pencil_bake_lighting(self, context, frame_number: int, gp_obj: bpy.ty
                         point.vertex_color[1] = acc_g / visible_light_count # g
                         point.vertex_color[2] = acc_b / visible_light_count # b
                         point.vertex_color[3] = 1 # a
+
 
                     # print(point, world_position, point.vertex_color)
