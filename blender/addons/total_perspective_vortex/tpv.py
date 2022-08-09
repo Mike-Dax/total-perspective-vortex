@@ -66,19 +66,7 @@ def serialise_quaternion(quat: mathutils.Quaternion):
 
 SCALE_DIVISOR = 0.015 # 0.01
 
-def serialise_position(vec: list[float], context, obj):
-    world_coordinate = obj.matrix_world @ vec  # Multiply by the world matrix
-
-    # This scale is manually defined
-    scale_length = SCALE_DIVISOR # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
-
-    return [
-        serialise_float(world_coordinate.x / scale_length),
-        serialise_float(world_coordinate.y / scale_length),
-        serialise_float(world_coordinate.z / scale_length),
-    ]
-
-def serialise_position_no_world_multiply(world_coordinate: list[float], context, obj):
+def serialise_position(world_coordinate: list[float], context):
     # This scale is manually defined
     scale_length = SCALE_DIVISOR # context.scene.unit_settings.scale_length  # Grab the scene scale, output will be in millimeters
 
@@ -166,7 +154,7 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
                     point_struct = dict({
                         "id": "{obj_name}-{layer_name}-{stroke_counter}-{point_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter, point_counter=point_counter),
-                        "co": serialise_position(point.co, context, gp_obj),
+                        "co": serialise_position(gp_obj.matrix_world @ point.co, context),
                         "pressure": serialise_float(point.pressure),
                         "strength": serialise_float(point.strength),
                         "vertexColor": serialise_vector(point.vertex_color),
@@ -230,10 +218,12 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
     has_content = False
 
     obj_name = slugify(pt_obj.name)
+    
+    evaluated_ps = pt_obj.evaluated_get(deps_graph)
 
-    loc, rot, scale = pt_obj.matrix_world.decompose()
+    loc, rot, scale = evaluated_ps.matrix_world.decompose()
 
-    material_slots = pt_obj.evaluated_get(deps_graph).material_slots
+    material_slots = evaluated_ps.material_slots
 
     # Extract the camera details for occlusion culling
     camera_location, camera_rot, camera_scale = context.scene.camera.matrix_world.decompose()
@@ -265,19 +255,18 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
                 continue
 
             # Do a raycast at the camera to see if it's occluded
-            local_start: Vector = particle.location - loc
-            starting_point: Vector = camera_location  # The particle in world space
-            ending_point: Vector = pt_obj.matrix_world @ local_start  # The camera
+            starting_point: Vector = camera_location # The camera
+            ending_point: Vector = particle.location # The particle in world space
             direction = (ending_point - starting_point).normalized()
             distance = (ending_point - starting_point).length
 
             # Scene raycast
             result, location, normal, index, object, matrix = context.scene.ray_cast(deps_graph, starting_point,
                                                                                      direction, distance=distance)
-
+            
             particle_struct = dict({
                 "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
-                "location": serialise_position(particle.location - loc, context, pt_obj),
+                "location": serialise_position(particle.location, context),
                 "quaternion": serialise_quaternion(particle.rotation),
                 "velocity": serialise_vector(particle.velocity),
                 "occluded": True if result else False
@@ -304,7 +293,7 @@ def camera_export(self, context, frame_number: int, cm_obj: bpy.types.Camera):
         "focal_length": cm_obj.data.lens,
         "sensor_height": sensor_height,
         "sensor_width": sensor_width,
-        "position": serialise_position_no_world_multiply(loc, context, cm_obj),
+        "position": serialise_position(loc, context),
         "quaternion": serialise_quaternion(rot),
         "near": serialise_float(cm_obj.data.clip_start / SCALE_DIVISOR),
         "far": serialise_float(cm_obj.data.clip_end / SCALE_DIVISOR),
@@ -341,7 +330,7 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
             "type": "color",
             "color": serialise_vector(evaluated_light.data.color)
         }),
-        "position": serialise_position_no_world_multiply(loc, context, evaluated_light),
+        "position": serialise_position(loc, context),
         "occluded": True if result else False
     })
 
@@ -436,9 +425,9 @@ def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
                 point: bpy.types.BezierSplinePoint = point
 
                 point_struct = dict({
-                    "co": serialise_position(point.co, context, evaluated_curve),
-                    "handle_left": serialise_position(point.handle_left, context, evaluated_curve),
-                    "handle_right": serialise_position(point.handle_right, context, evaluated_curve),
+                    "co": serialise_position(evaluated_curve.matrix_world @ point.co, context),
+                    "handle_left": serialise_position(evaluated_curve.matrix_world @ point.handle_left, context),
+                    "handle_right": serialise_position(evaluated_curve.matrix_world @ point.handle_right, context),
                     "handle_left_type": point.handle_left_type,
                     "handle_right_type": point.handle_right_type,
                 })
@@ -448,6 +437,7 @@ def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
             pass
 
     save_file(get_output_filepath(context, frame_number, cu_obj.name), save_struct)
+
 
 
 def get_random_color():
