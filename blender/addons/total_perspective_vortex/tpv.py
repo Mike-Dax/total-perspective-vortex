@@ -111,8 +111,11 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
         # If there's a real material, use that
         if len(gp_obj.data.materials) > 0:
             layer_struct["material"] = serialise_material(gp_obj.data.materials[gp_obj.active_material_index].name)
+            
+        # Fallback to simple layer color if the material doesn't work
+        if layer_struct["material"] is None:
+            layer_struct["material"] = serialise_material_simple_emission(col)
 
-        # Override the material if we have an override
 
         dict_assign(layer_struct["material"], gp_obj.data, "material.")
 
@@ -181,10 +184,34 @@ def serialise_material_simple_emission(color: mathutils.Color):
 
 
 def serialise_material(material_slot: str):
-    # Right now, assume it's a simple Emission material with a default colour
+    # Get the material first
+    mat = None
+    
     try:
-        # Fetch the material from the graph
         mat = bpy.data.materials[material_slot]
+    except:
+        print("Material {slot} wasn't accessible".format(slot=material_slot))
+        return None
+
+    # Try the grease pencil attributes
+    if mat.is_grease_pencil:
+        try:
+            # bpy.data.materials["Material.003"].grease_pencil.color
+
+            gp = mat.grease_pencil
+            color = gp.color
+
+            return dict({
+                "type": "color",
+                "color": serialise_vector(color)
+            })
+        except:
+            pass
+
+    # Try a simple Emission material with a default colour
+    try:
+        # bpy.data.materials["Material.001"].node_tree.nodes["Emission"].inputs[0].default_value
+        
         # get the nodes
         nodes = mat.node_tree.nodes
         # get some specific node:
@@ -193,14 +220,16 @@ def serialise_material(material_slot: str):
 
         if emission is None:
             print("Material {slot} has no Emission nodes".format(slot=material_slot))
-            return None
+            pass
 
         return dict({
             "type": "color",
             "color": serialise_vector(emission.inputs[0].default_value)
         })
     except:
-        return None
+        pass
+
+    return None
 
 
 def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.bpy_struct):
