@@ -371,18 +371,41 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
 def empty_export(self, context, frame_number: int, em_obj: bpy.types.bpy_struct):
     # Grab the evaluated dependency graph
     deps_graph = context.evaluated_depsgraph_get()
-    evaluated_light = em_obj.evaluated_get(deps_graph)
+    evaluated_empty = em_obj.evaluated_get(deps_graph)
 
     save_struct = dict({
         "type": "empty",
         "frame": frame_number,
-        "name": evaluated_light.name,
+        "name": evaluated_empty.name,
         "data": dict({}),
     })
 
     dict_assign(save_struct["data"], em_obj, "frame.")
 
     save_file(get_output_filepath(context, frame_number, em_obj.name), save_struct)
+
+
+def effector_export(self, context, frame_number: int, ef_obj: bpy.types.bpy_struct):
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_effector = ef_obj.evaluated_get(deps_graph)
+
+    loc, rot, scale = evaluated_effector.matrix_world.decompose()
+
+    save_struct = dict({
+        "type": "effector",
+        "name": evaluated_effector.name,
+        "frame": frame_number,
+        "position": serialise_position(loc, context),
+        "quaternion": serialise_quaternion(rot),
+        "display_size": evaluated_effector.empty_display_size / SCALE_DIVISOR,  # 1 = 100 mm
+        "display_type": evaluated_effector.empty_display_type, 
+        "align": evaluated_effector.get("align", "start"), # the object can have a custom property called align which can be: center, start, end
+        "enabled": True if evaluated_effector.get("enabled", 1) == 1 else False, # whether the effector is enabled this frame
+        "duration": evaluated_effector.get("duration", 0), # object can set its own exposure time, by default it's 0, the max speed
+    })
+
+    save_file(get_output_filepath(context, frame_number, evaluated_effector.name), save_struct)
 
 
 def dict_assign(original, mutations, prefix):
@@ -529,6 +552,10 @@ class OBJECT_OT_TPVExport(Operator):
 
                 if selObj.type == "CURVE":
                     curve_export(self, bpy.context, frame_number, selObj)
+                    continue
+
+                if selObj.type == "EMPTY" and selObj.name.lower().startswith("effector"):
+                    effector_export(self, bpy.context, frame_number, selObj)
                     continue
 
                 if selObj.type == "EMPTY":
