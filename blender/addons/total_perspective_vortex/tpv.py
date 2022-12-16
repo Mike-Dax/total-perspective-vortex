@@ -293,12 +293,16 @@ def particle_system_export(self, context, frame_number: int, pt_obj: bpy.types.b
             result, location, normal, index, object, matrix = context.scene.ray_cast(deps_graph, starting_point,
                                                                                      direction, distance=distance)
             
+            # Lifecycle is a float from 0-1 representing how close it is to death.
+            lifecycle = float(frame_number - particle.birth_time) / float(particle.lifetime)
+
             particle_struct = dict({
                 "id": "{obj_name}-{system_name}-{counter}".format(obj_name=obj_name, system_name=system_name, counter=counter),
                 "location": serialise_position(particle.location, context),
                 "quaternion": serialise_quaternion(particle.rotation),
                 "velocity": serialise_vector(particle.velocity),
-                "occluded": True if result else False
+                "occluded": True if result else False,
+                "lifecycle": lifecycle,
             })
             system_struct["particles"].append(particle_struct)
 
