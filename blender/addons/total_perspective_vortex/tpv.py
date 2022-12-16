@@ -407,6 +407,8 @@ def effector_export(self, context, frame_number: int, ef_obj: bpy.types.bpy_stru
         "align": evaluated_effector.get("align", "start"), # the object can have a custom property called align which can be: center, start, end
         "enabled": True if evaluated_effector.get("enabled", 1) == 1 else False, # whether the effector is enabled this frame
         "duration": evaluated_effector.get("duration", 0), # object can set its own exposure time, by default it's 0, the max speed
+        # Probably temporary:
+        "dmx_val": evaluated_effector.get("dmx_val", 0), # a value from 0 to 100 representing the DMX light
     })
 
     save_file(get_output_filepath(context, frame_number, evaluated_effector.name), save_struct)
