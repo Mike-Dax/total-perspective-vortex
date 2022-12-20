@@ -97,6 +97,8 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
     obj_name = slugify(gp_obj.name)
 
+    # print("processing grease pencil", gp_obj)
+
     for layer in gp_layers:
         layer: bpy.types.GPencilLayer
 
@@ -104,20 +106,8 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
         layer_struct = dict({
             "info": layer.info,
-            "material": serialise_material_simple_emission(col),
             "strokes": [],
         })
-
-        # If there's a real material, use that
-        if len(gp_obj.data.materials) > 0:
-            layer_struct["material"] = serialise_material(gp_obj.data.materials[gp_obj.active_material_index].name)
-            
-        # Fallback to simple layer color if the material doesn't work
-        if layer_struct["material"] is None:
-            layer_struct["material"] = serialise_material_simple_emission(col)
-
-
-        dict_assign(layer_struct["material"], gp_obj.data, "material.")
 
         save_struct["layers"].append(layer_struct)
 
@@ -136,14 +126,25 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
                 stroke_counter += 1
 
                 # A stroke is a collection of points, between which lines may be drawn
+                # They can have unique materials, or vertex colours
                 stroke: bpy.types.GPencilStroke
 
-                # stroke_col = get_random_color()
-
                 stroke_struct = dict({
+                    "id": "{obj_name}-{layer_name}-{stroke_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter),
+                    "material": serialise_material_simple_emission(col),
                     "useCyclic": stroke.use_cyclic,
                     "points": []
                 })
+
+                # If there's a real material, use that
+                if len(gp_obj.data.materials) > 0:
+                    stroke_struct["material"] = serialise_material(gp_obj.data.materials[stroke.material_index].name)
+                    # print("real material found", stroke_struct["material"])
+                
+                # If there are fancy material settings, apply them
+                dict_assign(stroke_struct["material"], gp_obj.data, "material.")
+
+                # add the stroke to the list
                 layer_struct["strokes"].append(stroke_struct)
 
                 points: bpy.types.GPencilStrokePoints = stroke.points
