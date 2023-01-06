@@ -6,6 +6,7 @@ import bpy
 import bmesh
 import mathutils
 import re
+import numpy as np
 
 from bpy.types import Operator
 from mathutils.bvhtree import BVHTree
@@ -79,6 +80,31 @@ def serialise_position(world_coordinate: list[float], context):
 # Up to 6 decimals of precision
 def serialise_float(f: float):
     return round(f, 6)
+
+
+def serialise_float_numpy_array(array: np.ndarray):
+    """
+    Serialise an array of floats
+    """
+    return array.round(decimals=6).tolist()
+
+
+def serialise_position_numpy_array(array: np.ndarray):
+    """
+    Serialise an array of positions
+    """
+    return serialise_float_numpy_array(array / SCALE_DIVISOR)
+
+
+def transform_position_numpy_array(positions: np.ndarray, transformation_matrix: np.ndarray):
+    """
+    Transform an array of positions by a 4x4 transformation matrix
+    
+    Can be used to transform an array of local positions to world space all at once
+    """
+    rotation_and_scale: np.ndarray = transformation_matrix[0:3, 0:3]
+    location: np.ndarray = transformation_matrix.T[3:4, 0:3].flatten()
+    return np.dot(rotation_and_scale, positions.T).T + location
 
 
 def slugify(name: str):
@@ -498,12 +524,88 @@ def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
     save_file(get_output_filepath(context, frame_number, cu_obj.name), save_struct)
 
 
+COLOR_ATTRIBUTE_NAME = "color"
+DEFAULT_COLOR = [1.0, 1.0, 1.0, 1.0]
+
+def geometry_nodes_mesh_export(self, context, frame_number: int, gn_obj: bpy.types.bpy_struct):
+    """
+    Exports the edges of a mesh object
+    
+    Looks for a color attribute matching COLOR_ATTRIBUTE_NAME on the vertex domain; uses DEFAULT_COLOR as fallback.
+    """
+
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_obj = gn_obj.evaluated_get(deps_graph)
+    
+    # Check if mesh has any edges, else return early
+    edge_count = len(evaluated_obj.data.edges)
+    if edge_count == 0:
+        return
+    
+    # Get vertex-indices of each edge
+    edge_vertex_indices: np.ndarray = np.empty(edge_count * 2).astype(int)
+    evaluated_obj.data.edges.foreach_get("vertices", edge_vertex_indices)
+    edge_vertex_indices.shape = (edge_count, 2)
+    
+    # Get mesh vertices
+    vertex_count = len(evaluated_obj.data.vertices)
+    vertex_positions: np.ndarray = np.empty(vertex_count * 3)
+    evaluated_obj.data.vertices.foreach_get("co", vertex_positions)
+    vertex_positions.shape = (vertex_count, 3)
+
+    # Transform positions to world-space
+    vertex_positions = transform_position_numpy_array(vertex_positions, np.array(evaluated_obj.matrix_world))
+    
+    # Get color attributes
+    attribute: bpy.types.Attribute = evaluated_obj.data.attributes.get(COLOR_ATTRIBUTE_NAME)
+    
+    colors: np.ndarray = np.empty(vertex_count * 4)
+    if attribute != None and attribute.data_type == "FLOAT_COLOR" and attribute.domain == "POINT":
+        # Color attribute was found on the point domain
+        attribute.data.foreach_get("color", colors)
+        colors.shape = (vertex_count, 4)
+    else:
+        # Color attribute does not exist; Use default color instead
+        colors = np.array([DEFAULT_COLOR]).repeat(vertex_count, axis=0)
+    
+    # Convert numpy arrays to lists, rounded to 6 decimal places
+    serialised_vertex_positions: list = serialise_position_numpy_array(vertex_positions)
+    serialised_colors: list = serialise_float_numpy_array(colors)
+    
+    # Prepare save struct
+    obj_name = slugify(gn_obj.name)
+    save_struct = dict({
+        "type": "gn_mesh",
+        "frame": frame_number,
+        "name": obj_name,
+        "edges": [],
+    })
+    
+    # Fill save struct with vertex positions and colours for each edge
+    for edge_counter, vertex_indices in enumerate(edge_vertex_indices):
+        edge_struct = dict({
+            "edge_index": edge_counter,
+            "points": []
+        })
+        save_struct["edges"].append(edge_struct)
+        
+        for point_counter, i in enumerate(vertex_indices):
+            point_struct = dict({
+                "id": f"{obj_name}-{edge_counter}-{point_counter}",
+                "co": serialised_vertex_positions[i],
+                "color": serialised_colors[i],
+            })
+            edge_struct["points"].append(point_struct)
+    
+    # Save the frame
+    save_file(get_output_filepath(context, frame_number, gn_obj.name), save_struct)
+
 
 def get_random_color():
     ''' generate rgb using a list comprehension '''
     r, g, b = [random.random() for i in range(3)]
     return r, g, b, 1
-
 
 
 class OBJECT_OT_TPVExport(Operator):
@@ -545,6 +647,10 @@ class OBJECT_OT_TPVExport(Operator):
                 selObj.select_set(True)
                 bpy.context.view_layer.objects.active = selObj
 
+                if selObj.name[:3] == "GN_" and selObj.type == "MESH":
+                    geometry_nodes_mesh_export(self, bpy.context, frame_number, selObj)
+                    continue
+                
                 if selObj.type == "GPENCIL":
                     grease_pencil_export(self, bpy.context, frame_number, selObj)
                     continue
@@ -580,6 +686,7 @@ class OBJECT_OT_TPVExport(Operator):
         bpy.context.scene.frame_set(saveFrame)
 
         return {'FINISHED'}
+
 
 class LightData(TypedDict):
     world_position: Vector
