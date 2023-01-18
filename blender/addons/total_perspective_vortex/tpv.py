@@ -112,18 +112,25 @@ def slugify(name: str):
 
 
 def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct):
-    gp_layers = gp_obj.data.layers
+
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_obj = gp_obj.evaluated_get(deps_graph)
+    
+    gp_layers = evaluated_obj.data.layers
 
     save_struct = dict({
         "type": "gpencil",
         "frame": frame_number,
-        "name": gp_obj.name,
+        "name": evaluated_obj.name,
         "layers": [],
     })
 
-    obj_name = slugify(gp_obj.name)
+    obj_name = slugify(evaluated_obj.name)
 
-    # print("processing grease pencil", gp_obj)
+    # print("--- frame", frame_number)
+
+    # print("processing grease pencil", evaluated_obj)
 
     for layer in gp_layers:
         layer: bpy.types.GPencilLayer
@@ -139,60 +146,65 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
 
         layer_name = slugify(layer.info)
 
-        for frame in layer.frames:
-            frame: bpy.types.GPencilFrame
+        # Find the last frame before or at the current frame_number
+        candidate_frames = [f for f in layer.frames if f.frame_number <= frame_number]
 
-            # Only do this frame
-            if frame.frame_number != frame_number:
-                continue
+        # If this layer hasn't begun yet
+        if len(candidate_frames) == 0:
+            continue
+        
+        # Otherwise select the latest frame
+        frame: bpy.types.GPencilFrame = candidate_frames[-1]
 
-            stroke_counter = 0
+        # print("candidate frame:", frame.frame_number, "current frame", frame_number)
 
-            for stroke in frame.strokes:
-                stroke_counter += 1
+        stroke_counter = 0
 
-                # A stroke is a collection of points, between which lines may be drawn
-                # They can have unique materials, or vertex colours
-                stroke: bpy.types.GPencilStroke
+        for stroke in frame.strokes:
+            stroke_counter += 1
 
-                stroke_struct = dict({
-                    "id": "{obj_name}-{layer_name}-{stroke_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter),
-                    "material": serialise_material_simple_emission(col),
-                    "useCyclic": stroke.use_cyclic,
-                    "points": []
+            # A stroke is a collection of points, between which lines may be drawn
+            # They can have unique materials, or vertex colours
+            stroke: bpy.types.GPencilStroke
+
+            stroke_struct = dict({
+                "id": "{obj_name}-{layer_name}-{stroke_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter),
+                "material": serialise_material_simple_emission(col),
+                "useCyclic": stroke.use_cyclic,
+                "points": []
+            })
+
+            # If there's a real material, use that
+            if len(evaluated_obj.data.materials) > 0:
+                stroke_struct["material"] = serialise_material(evaluated_obj.data.materials[stroke.material_index].name)
+                # print("real material found", stroke_struct["material"])
+            
+            # If there are fancy material settings, apply them
+            dict_assign(stroke_struct["material"], evaluated_obj.data, "material.")
+
+            # add the stroke to the list
+            layer_struct["strokes"].append(stroke_struct)
+
+            points: bpy.types.GPencilStrokePoints = stroke.points
+
+            point_counter = 0
+
+            for point in points:
+                point_counter += 1
+
+                point: bpy.types.GPencilStrokePoint
+
+                point_struct = dict({
+                    "id": "{obj_name}-{layer_name}-{stroke_counter}-{point_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter, point_counter=point_counter),
+                    "co": serialise_position(evaluated_obj.matrix_world @ point.co, context),
+                    "pressure": serialise_float(point.pressure),
+                    "strength": serialise_float(point.strength),
+                    "vertexColor": serialise_vector(point.vertex_color),
                 })
-
-                # If there's a real material, use that
-                if len(gp_obj.data.materials) > 0:
-                    stroke_struct["material"] = serialise_material(gp_obj.data.materials[stroke.material_index].name)
-                    # print("real material found", stroke_struct["material"])
-                
-                # If there are fancy material settings, apply them
-                dict_assign(stroke_struct["material"], gp_obj.data, "material.")
-
-                # add the stroke to the list
-                layer_struct["strokes"].append(stroke_struct)
-
-                points: bpy.types.GPencilStrokePoints = stroke.points
-
-                point_counter = 0
-
-                for point in points:
-                    point_counter += 1
-
-                    point: bpy.types.GPencilStrokePoint
-
-                    point_struct = dict({
-                        "id": "{obj_name}-{layer_name}-{stroke_counter}-{point_counter}".format(obj_name=obj_name, layer_name=layer_name, stroke_counter=stroke_counter, point_counter=point_counter),
-                        "co": serialise_position(gp_obj.matrix_world @ point.co, context),
-                        "pressure": serialise_float(point.pressure),
-                        "strength": serialise_float(point.strength),
-                        "vertexColor": serialise_vector(point.vertex_color),
-                    })
-                    stroke_struct["points"].append(point_struct)
+                stroke_struct["points"].append(point_struct)
 
     # Save the frame
-    save_file(get_output_filepath(context, frame_number, gp_obj.name), save_struct)
+    save_file(get_output_filepath(context, frame_number, evaluated_obj.name), save_struct)
 
 
 def serialise_material_simple_emission(color: mathutils.Color):
