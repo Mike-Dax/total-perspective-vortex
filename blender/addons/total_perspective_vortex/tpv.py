@@ -614,6 +614,70 @@ def geometry_nodes_mesh_export(self, context, frame_number: int, gn_obj: bpy.typ
     save_file(get_output_filepath(context, frame_number, gn_obj.name), save_struct)
 
 
+def geometry_nodes_verts_export(self, context, frame_number: int, gp_obj: bpy.types.bpy_struct):
+    """
+    Exports the vertices of a mesh object
+    
+    Looks for a color attribute matching COLOR_ATTRIBUTE_NAME on the vertex domain; uses DEFAULT_COLOR as fallback.
+    """
+
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_obj = gp_obj.evaluated_get(deps_graph)
+    
+    # Check if mesh has any edges, else return early
+    vertices_count = len(evaluated_obj.data.vertices)
+    if vertices_count == 0:
+        return
+    
+    # Get mesh vertices
+    vertex_count = len(evaluated_obj.data.vertices)
+    vertex_positions: np.ndarray = np.empty(vertex_count * 3)
+    evaluated_obj.data.vertices.foreach_get("co", vertex_positions)
+    vertex_positions.shape = (vertex_count, 3)
+
+    # Transform positions to world-space
+    vertex_positions = transform_position_numpy_array(vertex_positions, np.array(evaluated_obj.matrix_world))
+    
+    # Get color attributes
+    attribute: bpy.types.Attribute = evaluated_obj.data.attributes.get(COLOR_ATTRIBUTE_NAME)
+    
+    colors: np.ndarray = np.empty(vertex_count * 4)
+    if attribute != None and attribute.data_type == "FLOAT_COLOR" and attribute.domain == "POINT":
+        # Color attribute was found on the point domain
+        attribute.data.foreach_get("color", colors)
+        colors.shape = (vertex_count, 4)
+    else:
+        # Color attribute does not exist; Use default color instead
+        colors = np.array([DEFAULT_COLOR]).repeat(vertex_count, axis=0)
+    
+    # Convert numpy arrays to lists, rounded to 6 decimal places
+    serialised_vertex_positions: list = serialise_position_numpy_array(vertex_positions)
+    serialised_colors: list = serialise_float_numpy_array(colors)
+    
+    # Prepare save struct
+    obj_name = slugify(gp_obj.name)
+    save_struct = dict({
+        "type": "gn_vertices",
+        "frame": frame_number,
+        "name": obj_name,
+        "points": [],
+    })
+    
+    # Fill save struct with vertex positions and colours for each edge
+
+    for point_counter, co in enumerate(serialised_vertex_positions):
+        point_struct = dict({
+            "id": f"{obj_name}-{point_counter}",
+            "co": co,
+            "color": serialised_colors[point_counter],
+        })
+        save_struct["points"].append(point_struct)
+    
+    # Save the frame
+    save_file(get_output_filepath(context, frame_number, gp_obj.name), save_struct)
+
+
 def get_random_color():
     ''' generate rgb using a list comprehension '''
     r, g, b = [random.random() for i in range(3)]
@@ -659,6 +723,10 @@ class OBJECT_OT_TPVExport(Operator):
                 selObj.select_set(True)
                 bpy.context.view_layer.objects.active = selObj
 
+                if selObj.name[:3] == "GP_" and selObj.type == "MESH":
+                    geometry_nodes_verts_export(self, bpy.context, frame_number, selObj)
+                    continue
+
                 if selObj.name[:3] == "GN_" and selObj.type == "MESH":
                     geometry_nodes_mesh_export(self, bpy.context, frame_number, selObj)
                     continue
@@ -690,7 +758,8 @@ class OBJECT_OT_TPVExport(Operator):
                 print("Unknown object type selected:", selObj.type)
 
             # Export the active camera regardless of which ones are selected
-            camera_export(self, bpy.context, frame_number, bpy.context.scene.camera)
+            if bpy.context.scene.camera:
+                camera_export(self, bpy.context, frame_number, bpy.context.scene.camera)
 
 
 
