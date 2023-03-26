@@ -831,6 +831,7 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
             for point in spline.points:
                 point: bpy.types.CurvePoint = point
                 point_struct = dict({
+                    "color": point_attributes["color"][point.index],
                     "co": point_attributes["position"][point.index],
                 })
                 spline_struct["points"].append(point_struct)
