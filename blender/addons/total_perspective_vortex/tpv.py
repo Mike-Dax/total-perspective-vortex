@@ -677,6 +677,169 @@ def geometry_nodes_verts_export(self, context, frame_number: int, gp_obj: bpy.ty
     # Save the frame
     save_file(get_output_filepath(context, frame_number, gp_obj.name), save_struct)
 
+class CurveType:
+    """
+    Curve type enums, from Blender source code: blender/source/blender/makesdna/DNA_curves_types.h
+    """
+    CURVE_TYPE_CATMULL_ROM: int = 0
+    CURVE_TYPE_POLY: int = 1
+    CURVE_TYPE_BEZIER: int = 2
+    CURVE_TYPE_NURBS: int = 3
+
+class HandleType:
+    """
+    Curve handle type enums, from Blender source code: blender/source/blender/makesdna/DNA_curves_types.h
+    """
+    # The handle can be moved anywhere, and doesn't influence the point's other handle.
+    BEZIER_HANDLE_FREE: int = 0
+    # The location is automatically calculated to be smooth.
+    BEZIER_HANDLE_AUTO: int = 1
+    # The location is calculated to point to the next/previous control point.
+    BEZIER_HANDLE_VECTOR: int = 2
+    # The location is constrained to point in the opposite direction as the other handle.
+    BEZIER_HANDLE_ALIGN: int = 3
+
+def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_struct):
+    """
+    Exports the splines of a hair-curves object
+    
+    Looks for a color attribute matching COLOR_ATTRIBUTE_NAME on the point domain; uses DEFAULT_COLOR as fallback.
+    """
+
+    # Grab the evaluated dependency graph
+    deps_graph = context.evaluated_depsgraph_get()
+    evaluated_obj = cu_obj.evaluated_get(deps_graph)
+    data: bpy.types.Curves = evaluated_obj.data
+
+    # Check if object has any splines, else return early
+    spline_count: int = len(data.curves)
+    if spline_count == 0:
+        return
+    
+    point_count: int = len(data.points)
+    attributes: bpy.types.AttributeGroup = data.attributes
+    
+    # Create a dictionary for spline attributes
+    spline_attributes = dict({
+        "curve_type" : np.empty(spline_count).astype(int),
+        "cyclic": np.empty(spline_count).astype(bool)
+    })
+
+    # Get "spline_type" attribute if it exists, else default to CurveType.CURVE_TYPE_POLY
+    if "curve_type" in attributes:
+        attributes.get("curve_type").data.foreach_get("value", spline_attributes["curve_type"])
+    else:
+        spline_attributes["curve_type"] = np.array([CurveType.CURVE_TYPE_POLY]).repeat(spline_count, axis=0)
+    
+    # Get "cyclic" attribute if it exists, else default to False
+    if "cyclic" in attributes:
+        attributes.get("cyclic").data.foreach_get("value", spline_attributes["cyclic"])
+    else:
+        spline_attributes["cyclic"] = np.array([False]).repeat(spline_count, axis=0)
+    
+    # Convert numpy arrays to lists
+    for attribute in spline_attributes:
+        spline_attributes[attribute] = spline_attributes[attribute].tolist()
+
+    # Create a dictionary for point attributes
+    point_attributes = {
+        "position" : np.empty(point_count * 3).astype(np.float32),
+    }
+    attributes_to_transform: list[str] = ["position"]
+
+    # Get point positions
+    attributes.get("position").data.foreach_get("vector", point_attributes["position"])
+    point_attributes["position"].shape = (point_count, 3)
+
+    # Get color attributes
+    if COLOR_ATTRIBUTE_NAME in data.color_attributes:
+        # Color attribute was found on the point domain
+        point_attributes["color"] = np.empty(point_count * 4).astype(np.float32)
+        attributes.get(COLOR_ATTRIBUTE_NAME).data.foreach_get("color", point_attributes["color"])
+        point_attributes["color"].shape = (point_count, 4)
+    else:
+        # Color attribute does not exist; Use default color instead
+        point_attributes["color"] = np.array([DEFAULT_COLOR]).repeat(point_count, axis=0)
+
+    # Convert color numpy arrays to lists, rounded to 6 decimal places
+    point_attributes["color"] = serialise_float_numpy_array(point_attributes["color"])
+
+    # Get Bezier attributes if any Bezier splines exist
+    if CurveType.CURVE_TYPE_BEZIER in spline_attributes["curve_type"]:
+        point_attributes["handle_left"] = np.empty(point_count * 3).astype(np.float32)
+        point_attributes["handle_right"] = np.empty(point_count * 3).astype(np.float32)
+        point_attributes["handle_type_left"] = np.empty(point_count).astype(int)
+        point_attributes["handle_type_right"] = np.empty(point_count).astype(int)
+
+        attributes.get("handle_left").data.foreach_get("vector", point_attributes["handle_left"])
+        attributes.get("handle_right").data.foreach_get("vector", point_attributes["handle_right"])
+        attributes.get("handle_type_left").data.foreach_get("value", point_attributes["handle_type_left"])
+        attributes.get("handle_type_right").data.foreach_get("value", point_attributes["handle_type_right"])
+
+        point_attributes["handle_left"].shape = (point_count, 3)
+        point_attributes["handle_right"].shape = (point_count, 3)
+
+        attributes_to_transform += ["handle_left", "handle_right"]
+
+        # Convert handle_type numpy arrays to lists
+        for handle_type in ["handle_type_left", "handle_type_right"]:
+            point_attributes[handle_type] = point_attributes[handle_type].tolist()
+    
+    for attribute in attributes_to_transform:
+        # Transform position attributes to world space
+        point_attributes[attribute] = transform_position_numpy_array(point_attributes[attribute], np.array(evaluated_obj.matrix_world))
+    
+        # Convert numpy arrays to lists, rounded to 6 decimal places
+        point_attributes[attribute] = serialise_position_numpy_array(point_attributes[attribute])
+    
+    # Prepare save struct
+    obj_name = slugify(cu_obj.name)
+    save_struct = dict({
+        "type": "gn_curves",
+        "frame": frame_number,
+        "name": obj_name,
+        "splines": [],
+    })
+
+    # Fill save struct with data
+    for spline in data.curves:
+        spline: bpy.types.CurveSlice = spline
+        spline_first_point_index: int = spline.first_point_index
+        spline_last_point_index: int = spline_first_point_index + spline.points_length
+        spline_type: int = spline_attributes["curve_type"][spline.index]
+        spline_cyclic: bool = spline_attributes["cyclic"][spline.index]
+
+        spline_struct = dict({
+            "type": spline_type,
+            "cyclic": spline_cyclic,
+            "points": [],
+        })
+
+        if spline_type == CurveType.CURVE_TYPE_BEZIER:
+            for point in spline.points:
+                point: bpy.types.CurvePoint = point
+                point_struct = dict({
+                    "co": point_attributes["position"][point.index],
+                    "color": point_attributes["color"][point.index],
+                    "handle_left": point_attributes["handle_left"][point.index],
+                    "handle_right": point_attributes["handle_right"][point.index],
+                    "handle_type_left": point_attributes["handle_type_left"][point.index],
+                    "handle_type_right": point_attributes["handle_type_right"][point.index],
+                })
+                spline_struct["points"].append(point_struct)
+        else:
+            for point in spline.points:
+                point: bpy.types.CurvePoint = point
+                point_struct = dict({
+                    "co": point_attributes["position"][point.index],
+                })
+                spline_struct["points"].append(point_struct)
+        
+        save_struct["splines"].append(spline_struct)
+    
+    # Save the frame
+    save_file(get_output_filepath(context, frame_number, cu_obj.name), save_struct)
+
 
 def get_random_color():
     ''' generate rgb using a list comprehension '''
@@ -722,6 +885,10 @@ class OBJECT_OT_TPVExport(Operator):
                 bpy.ops.object.select_all(action='DESELECT')
                 selObj.select_set(True)
                 bpy.context.view_layer.objects.active = selObj
+
+                if selObj.type == "CURVES":
+                    hair_curves_export(self, bpy.context, frame_number, selObj)
+                    continue
 
                 if selObj.name[:3] == "GP_" and selObj.type == "MESH":
                     geometry_nodes_verts_export(self, bpy.context, frame_number, selObj)
