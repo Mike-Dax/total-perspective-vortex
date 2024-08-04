@@ -50,7 +50,7 @@ def get_output_filepath(context, frame_number: int, obj_name: str):
 # Given a filepath and struct to save, save a json file
 def save_file(file_path: str, contents: dict):
     with open(file_path, "w") as outfile:
-        json.dump(contents, outfile)
+        json.dump(contents, outfile, indent=2)
 
 
 def serialise_color(color: mathutils.Color):
@@ -423,7 +423,7 @@ def empty_export(self, context, frame_number: int, em_obj: bpy.types.bpy_struct)
         "data": dict({}),
     })
 
-    dict_assign(save_struct["data"], em_obj, "frame.")
+    dict_assign(save_struct["data"], em_obj, "")
 
     save_file(get_output_filepath(context, frame_number, em_obj.name), save_struct)
 
