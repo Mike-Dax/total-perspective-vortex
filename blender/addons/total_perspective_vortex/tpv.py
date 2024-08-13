@@ -50,11 +50,8 @@ def get_output_filepath(context, frame_number: int, obj_name: str):
 # Given a filepath and struct to save, save a json file
 def save_file(file_path: str, contents: dict):
     with open(file_path, "w") as outfile:
-        json.dump(contents, outfile, indent=2)
+        json.dump(contents, outfile) # indent=2
 
-
-def serialise_color(color: mathutils.Color):
-    return [color.r, color.g, color.b, 1]
 
 # Don't transform from Blender coordinate system, the Delta shares the same coordinate system, three is different
 def serialise_vector(vec: list[float]):
@@ -80,6 +77,25 @@ def serialise_position(world_coordinate: list[float], context):
 # Up to 6 decimals of precision
 def serialise_float(f: float):
     return round(f, 6)
+
+# Colours have less precision
+def serialise_color_element(f: float):
+    return round(f, 3)
+
+
+def serialise_vector_color(vec: list[float]):
+    return [serialise_color_element(p) for p in vec]
+
+
+def serialise_color(color: mathutils.Color):
+    return serialise_vector_color([color.r, color.g, color.b, 1])
+
+
+def serialise_color_numpy_array(array: np.ndarray):
+    """
+    Serialise an array of floats
+    """
+    return array.round(decimals=3).tolist()
 
 
 def serialise_float_numpy_array(array: np.ndarray):
@@ -199,7 +215,7 @@ def grease_pencil_export(self, context, frame_number: int, gp_obj: bpy.types.bpy
                     "co": serialise_position(evaluated_obj.matrix_world @ point.co, context),
                     "pressure": serialise_float(point.pressure),
                     "strength": serialise_float(point.strength),
-                    "vertexColor": serialise_vector(point.vertex_color),
+                    "vertexColor": serialise_vector_color(point.vertex_color),
                 })
                 stroke_struct["points"].append(point_struct)
 
@@ -218,7 +234,7 @@ def serialise_material_simple_emission(color: mathutils.Color):
 
     return dict({
         "type": "color",
-        "color": serialise_vector(color)
+        "color": serialise_vector_color(color)
     })
 
 
@@ -242,7 +258,7 @@ def serialise_material(material_slot: str):
 
             return dict({
                 "type": "color",
-                "color": serialise_vector(color)
+                "color": serialise_vector_color(color)
             })
         except:
             pass
@@ -263,7 +279,7 @@ def serialise_material(material_slot: str):
 
         return dict({
             "type": "color",
-            "color": serialise_vector(emission.inputs[0].default_value)
+            "color": serialise_vector_color(emission.inputs[0].default_value)
         })
     except:
         pass
@@ -400,7 +416,7 @@ def light_export(self, context, frame_number: int, li_obj: bpy.types.Light):
         "name": evaluated_light.name,
         "material": dict({
             "type": "color",
-            "color": serialise_vector(evaluated_light.data.color)
+            "color": serialise_vector_color(evaluated_light.data.color)
         }),
         "position": serialise_position(loc, context),
         "occluded": True if result else False
@@ -584,7 +600,7 @@ def geometry_nodes_mesh_export(self, context, frame_number: int, gn_obj: bpy.typ
     
     # Convert numpy arrays to lists, rounded to 6 decimal places
     serialised_vertex_positions: list = serialise_position_numpy_array(vertex_positions)
-    serialised_colors: list = serialise_float_numpy_array(colors)
+    serialised_colors: list = serialise_color_numpy_array(colors)
     
     # Prepare save struct
     obj_name = slugify(gn_obj.name)
@@ -654,7 +670,7 @@ def geometry_nodes_verts_export(self, context, frame_number: int, gp_obj: bpy.ty
     
     # Convert numpy arrays to lists, rounded to 6 decimal places
     serialised_vertex_positions: list = serialise_position_numpy_array(vertex_positions)
-    serialised_colors: list = serialise_float_numpy_array(colors)
+    serialised_colors: list = serialise_color_numpy_array(colors)
     
     # Prepare save struct
     obj_name = slugify(gp_obj.name)
@@ -765,7 +781,7 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
         point_attributes["color"] = np.array([DEFAULT_COLOR]).repeat(point_count, axis=0)
     
     # Convert color numpy arrays to lists, rounded to 6 decimal places
-    point_attributes["color"] = serialise_float_numpy_array(point_attributes["color"])
+    point_attributes["color"] = serialise_color_numpy_array(point_attributes["color"])
 
     has_uv = False
 
@@ -855,7 +871,7 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
             for point in spline.points:
                 point: bpy.types.CurvePoint = point
                 point_struct = dict({
-                    "color": point_attributes["color"][point.index],
+                    "color": serialise_vector_color(point_attributes["color"][point.index]),
                     "co": point_attributes["position"][point.index],
                 })
                 if "UV" in point_attributes:
