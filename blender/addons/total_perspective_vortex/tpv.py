@@ -538,6 +538,7 @@ def curve_export(self, context, frame_number: int, cu_obj: bpy.types.Curve):
 
 COLOR_ATTRIBUTE_NAME = "color"
 DEFAULT_COLOR = [1.0, 1.0, 1.0, 1.0]
+UV_ATTRIBUTE_NAME = "UV"
 
 def geometry_nodes_mesh_export(self, context, frame_number: int, gn_obj: bpy.types.bpy_struct):
     """
@@ -704,6 +705,8 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
     Exports the splines of a hair-curves object
     
     Looks for a color attribute matching COLOR_ATTRIBUTE_NAME on the point domain; uses DEFAULT_COLOR as fallback.
+    
+    Also looks for a 2D vector attribute matching UV_ATTRIBUTE_NAME on the point domain.
     """
 
     # Grab the evaluated dependency graph
@@ -760,10 +763,24 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
     else:
         # Color attribute does not exist; Use default color instead
         point_attributes["color"] = np.array([DEFAULT_COLOR]).repeat(point_count, axis=0)
-
+    
     # Convert color numpy arrays to lists, rounded to 6 decimal places
     point_attributes["color"] = serialise_float_numpy_array(point_attributes["color"])
 
+    has_uv = False
+
+    # Get UV attribute
+    if UV_ATTRIBUTE_NAME in attributes:
+        attribute = attributes.get(UV_ATTRIBUTE_NAME)
+        if attribute.domain == "POINT" and attribute.data_type == "FLOAT2":
+            # UV attribute was found on the point domain
+            point_attributes["UV"] =  np.empty(point_count * 2).astype(np.float32)
+            attribute.data.foreach_get("vector", point_attributes["UV"])
+            point_attributes["UV"].shape = (point_count, 2)
+            point_attributes["UV"] = serialise_float_numpy_array(point_attributes["UV"])
+
+            has_uv = True
+    
     # Get Bezier attributes if any Bezier splines exist
     if CurveType.CURVE_TYPE_BEZIER in spline_attributes["curve_type"]:
         point_attributes["handle_left"] = np.empty(point_count * 3).astype(np.float32)
@@ -815,6 +832,10 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
             "points": [],
         })
 
+        # TODO: Read this out of the object itself in case we need more than one texture
+        if has_uv:
+            spline_struct["texture_file"] = './texture.png'
+
         if spline_type == CurveType.CURVE_TYPE_BEZIER:
             for point in spline.points:
                 point: bpy.types.CurvePoint = point
@@ -826,6 +847,9 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
                     "handle_type_left": point_attributes["handle_type_left"][point.index],
                     "handle_type_right": point_attributes["handle_type_right"][point.index],
                 })
+                if "UV" in point_attributes:
+                    point_struct["uv"] = point_attributes["UV"][point.index]
+
                 spline_struct["points"].append(point_struct)
         else:
             for point in spline.points:
@@ -834,6 +858,9 @@ def hair_curves_export(self, context, frame_number: int, cu_obj: bpy.types.bpy_s
                     "color": point_attributes["color"][point.index],
                     "co": point_attributes["position"][point.index],
                 })
+                if "UV" in point_attributes:
+                    point_struct["uv"] = point_attributes["UV"][point.index]
+                
                 spline_struct["points"].append(point_struct)
         
         save_struct["splines"].append(spline_struct)
